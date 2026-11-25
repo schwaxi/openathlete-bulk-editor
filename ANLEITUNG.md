@@ -24,6 +24,8 @@ selbst neu. In die Datenbank schreibt der Editor nicht direkt.
   automatisch in 28-Tage-Abschnitte geteilt, läuft im Container weiter (siehe unten)
 - **Neue Aktivitäten holen** mit einem Klick (oben rechts): holt alles seit dem letzten
   Import und wendet danach automatisch deine Regeln an
+- **Garmin-Export importieren**: die große ZIP aus „Daten exportieren“ von Garmin Connect,
+  inklusive **Multisport** (Triathlon wird in Schwimmen, Wechsel, Rad, Laufen geteilt)
 
 ## 1. Dateien auf den Server kopieren
 
@@ -34,6 +36,9 @@ Auf dem Unraid-Server soll diese Struktur entstehen:
 ├── app/
 │   ├── server.js
 │   ├── garmin-import.js
+│   ├── export-import.js
+│   ├── fit.js
+│   ├── zip.js
 │   └── public/
 │       ├── index.html
 │       └── rules.js
@@ -123,6 +128,41 @@ Ausrüstung nach Kürzel. Oben rechts steht anschließend z. B. „✓ 3 neu · 
   ausschalten. **„Import meiner Garmin-Aktivitäten erlauben“** muss an bleiben.
 - Die Regeln gelten für alle Aktivitäten im geholten Zeitraum. Hast du dort eine
   Fahrt mit Kürzel von Hand anders eingestellt, setzt die Regel sie wieder zurück.
+
+## Garmin-Export importieren (inkl. Triathlon)
+
+Für deinen kompletten Verlauf ist das der beste Weg. Hier fehlt nichts, auch keine
+Multisport-Aktivitäten. Über die Garmin-Schnittstelle lehnt OpenAthlete Triathlons
+und Duathlons nämlich ab.
+
+1. In Garmin Connect den Datenexport anfordern (Konto → Datenverwaltung → Daten
+   exportieren). Garmin schickt nach einiger Zeit einen Download-Link per E-Mail.
+2. Die ZIP **unverändert** in den Ordner `data/import` des Editors legen, auf Unraid
+   `\\TOWER\appdata\openathlete-editor\data\import\`. Der Ordner wird beim ersten
+   Start angelegt. Entpacken ist nicht nötig.
+3. Im Editor unter **Garmin-Import → Garmin-Export importieren** die Datei wählen und
+   **Prüfen** klicken. Der Editor zeigt, wie viele Aktivitäten im Export sind, aus
+   welchem Zeitraum, wie viele davon Multisport sind und wie viele einen Namen aus
+   Garmin haben.
+4. **Import starten.**
+
+- Jede Aktivität wird einzeln über den Datei-Import von OpenAthlete hochgeladen,
+  wie beim Hochladen in der App. Das ist deutlich schneller als der Garmin-Import.
+- **Namen** kommen aus der Aktivitätsliste im Export, zugeordnet über die Startzeit.
+  Deine Kürzel wie „M9“ sind also dabei. Mit „Danach Regeln anwenden“ setzt der
+  Editor am Ende Sportart und Ausrüstung nach deinen Regeln.
+- **Multisport** wird geteilt: Aus „Ironman Zell“ werden „Ironman Zell – Schwimmen“,
+  „– Wechsel 1“, „– Rad“, „– Wechsel 2“ und „– Laufen“. Jede Teil-Aktivität hat ihre
+  eigenen Messwerte (GPS, Herzfrequenz, Leistung, Runden), und die Distanz beginnt
+  jeweils bei 0. Die Wechselzonen landen in OpenAthlete als „Sonstiges“.
+- **Schon vorhandene** Aktivitäten (z. B. vom Garmin-Import) lehnt OpenAthlete über
+  die Startzeit ab. Sie zählen als „schon vorhanden“. Du kannst den Export also
+  bedenkenlos über deinen Bestand laufen lassen.
+- Abbrechen, Fortsetzen (auch nach einem Neustart) und „Fehlgeschlagene wiederholen“
+  funktionieren wie beim Garmin-Import. Fehlgeschlagene stehen mit Grund in einer Liste.
+- Für das Entpacken braucht der Editor vorübergehend so viel freien Platz im
+  `data`-Ordner, wie die größte innere ZIP groß ist. Nach dem Import kannst du die
+  Export-ZIP aus `data/import` löschen.
 
 ## Garmin-Verlauf importieren
 

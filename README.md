@@ -29,6 +29,15 @@ bulk-edit your activities and import your full Garmin history.
 - Chunks with more than 1000 activities are automatically split in half
 - Optionally applies your rules to the imported range when done
 
+**Garmin data export import (incl. multisport)**
+- Imports the full ZIP from Garmin Connect's "Export your data", without unpacking it
+  (ZIP64 supported, nested ZIPs handled)
+- Activity names are taken from Garmin's activity list in the export (matched by start time)
+- **Multisport activities** (triathlon, duathlon …), which OpenAthlete rejects, are split into
+  one activity per leg, including transitions (imported as *Other*)
+- Uses OpenAthlete's file import (`POST /activity-import/fit|gpx|tcx`); duplicates are refused by OpenAthlete
+- Pause, resume, retry failed files, list of failures with reasons
+
 **Fetch new activities**
 - One-click button in the header: imports everything since the last import and then applies your rules
 - Optional: fetch automatically whenever the editor is opened (at most every 30 minutes)

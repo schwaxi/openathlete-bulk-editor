@@ -123,6 +123,55 @@
       <div id="gQuickMsg" class="err" style="margin-top:6px"></div>
     </div>
     <div class="card">
+      <h2>Garmin-Export importieren (ZIP aus „Daten exportieren“)</h2>
+      <div class="hint" style="margin-bottom:10px">
+        Lege die ZIP von Garmin unverändert in den Ordner <code>data/import</code> des Editors
+        (auf Unraid: <code>appdata/openathlete-editor/data/import</code>). Der Editor liest daraus alle
+        Aktivitätsdateien, übernimmt die Namen aus Garmin und lädt sie einzeln hoch.
+        <strong>Multisport</strong> (Triathlon, Duathlon …) wird in einzelne Aktivitäten geteilt,
+        Wechselzonen landen als „Sonstiges“. Schon vorhandene Aktivitäten lehnt OpenAthlete selbst ab.
+      </div>
+      <div class="row">
+        <label>Datei im Import-Ordner
+          <select id="xSource"></select>
+        </label>
+        <button id="xRefresh" class="small" title="Liste neu laden">↻</button>
+        <button id="xScan">Prüfen</button>
+        <label class="inline"><input type="checkbox" id="xRules" checked> Danach Regeln anwenden</label>
+        <button class="primary" id="xStart" disabled>Import starten</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label class="inline"><input type="checkbox" id="xUnnamed"> Auch Dateien ohne Eintrag in Garmins Aktivitätsliste importieren
+          <span class="muted">(meist in Garmin Connect gelöschte Aktivitäten oder Mehrfach-Uploads)</span></label>
+      </div>
+      <div id="xMsg" class="err" style="margin-top:6px"></div>
+      <div id="xJob" class="hidden" style="margin-top:10px">
+        <div class="progress"><div id="xBar"></div></div>
+        <div id="xPhase" style="margin-top:8px"></div>
+        <div id="xScanRes" class="summary"></div>
+        <div id="xTotals" class="summary hidden"></div>
+        <div class="row" style="margin-bottom:10px">
+          <button id="xCancel" class="hidden">Abbrechen</button>
+          <button id="xResume" class="primary hidden">Fortsetzen</button>
+          <button id="xRetry" class="hidden">Fehlgeschlagene wiederholen</button>
+          <button id="xClear" class="hidden">Verlauf löschen</button>
+        </div>
+        <div class="layout" style="grid-template-columns: minmax(0,1fr) minmax(0,1fr)">
+          <div>
+            <strong>Fehlgeschlagen</strong>
+            <div class="tablewrap" style="max-height:300px;margin-top:6px">
+              <table><thead><tr><th>Datum</th><th>Name</th><th>Grund</th></tr></thead><tbody id="xFailed"></tbody></table>
+            </div>
+          </div>
+          <div>
+            <strong>Protokoll</strong>
+            <div class="tablewrap" style="max-height:300px;margin-top:6px;padding:6px 8px;font-size:12px" id="xLog"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>Garmin-Verlauf importieren</h2>
       <div class="hint" style="margin-bottom:10px">
         OpenAthlete importiert pro Auftrag höchstens 28 Tage und nimmt höchstens 3 Aufträge pro 15 Minuten an.
@@ -837,7 +886,86 @@ async function refreshGarmin() {
   }
   renderGarminJob(data.job);
   renderQuickInfo(data.quick);
+  refreshExport();
 }
+
+// --------------------------------------------------------------------------
+// Garmin-Export (ZIP)
+// --------------------------------------------------------------------------
+let xLast = null;
+function fmtSize(b) { return b == null ? '' : b > 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(b / 1e6))} MB`; }
+async function refreshExport(forceList) {
+  let data;
+  try { data = await api('GET', '/api/export/status'); } catch (e) { $('xMsg').textContent = e.message; return; }
+  xLast = data;
+  const sel = $('xSource');
+  const opts = data.sources.map((s) => `${s.dir ? 'd' : 'f'}:${s.name}`).join('|');
+  if (forceList || sel.dataset.opts !== opts) {
+    const cur = sel.value;
+    sel.innerHTML = data.sources.length
+      ? data.sources.map((s) => `<option value="${esc(s.name)}">${esc(s.name)}${s.dir ? ' (Ordner)' : ` (${fmtSize(s.size)})`}</option>`).join('') +
+        (data.sources.length > 1 ? '<option value="">alles im Import-Ordner</option>' : '')
+      : '<option value="" disabled selected>– Ordner data/import ist leer –</option>';
+    if ([...sel.options].some((o) => o.value === cur)) sel.value = cur;
+    sel.dataset.opts = opts;
+  }
+  renderExport(data.job);
+}
+function renderExport(job) {
+  const busyX = job && (job.status === 'running' || job.status === 'scanning');
+  $('xScan').disabled = !!busyX || !xLast || !xLast.sources.length;
+  $('xStart').disabled = !job || job.status !== 'ready' || !job.total;
+  $('xJob').classList.toggle('hidden', !job);
+  if (!job) return;
+  const done = job.total - job.pending;
+  const importing = job.status !== 'scanning' && job.status !== 'ready' && job.status !== 'failed';
+  $('xBar').style.width = `${job.total && importing ? Math.round((done / job.total) * 100) : job.status === 'scanning' ? 5 : 0}%`;
+  const label = { scanning: 'Prüfe Export', ready: 'Geprüft', running: 'Import läuft', paused: 'Angehalten', cancelled: 'Abgebrochen', done: 'Fertig', failed: 'Fehler' }[job.status] || job.status;
+  $('xPhase').innerHTML = `<strong>${esc(label)}</strong> · ${esc(job.source || '')}${importing ? ` · ${done} von ${job.total}` : ''} · ${esc(job.phase || '')}`;
+  const sc = job.scan;
+  $('xScanRes').innerHTML = sc
+    ? `<strong>${sc.activities}</strong> Aktivitäten` + (sc.from ? ` von ${fmtDate(sc.from)} bis ${fmtDate(sc.to)}` : '') +
+      ` · ${sc.multisport || 0} Multisport (werden geteilt)` + (sc.named != null ? ` · ${sc.named} mit Namen aus Garmin` : '') +
+      (sc.nonActivity ? ` · ${sc.nonActivity} andere Dateien übersprungen` : '') + (sc.unreadable ? ` · <span class="err">${sc.unreadable} nicht lesbar</span>` : '') +
+      (sc.named === 0 && sc.activities ? '<br><span class="err">Keine Aktivitätsliste mit Namen gefunden. Die Aktivitäten heißen dann „Garmin &lt;Datum&gt;“.</span>' : '') +
+      (sc.named > 0 && sc.unnamed ? `<br>${sc.unnamed} Dateien haben keinen Eintrag in Garmins Aktivitätsliste. Sie werden übersprungen, außer du hakst unten „Auch Dateien ohne Eintrag …“ an.` : '')
+    : 'Prüfe …';
+  const t = job.totals;
+  $('xTotals').classList.toggle('hidden', !importing);
+  const r = job.rulesResult;
+  $('xTotals').innerHTML = `<strong>${t.imported}</strong> neu importiert` + (t.splitParts ? ` (Multisport als ${t.splitParts} Einzelaktivitäten)` : '') +
+    ` · ${t.exists} schon vorhanden` + (t.skipped ? ` · ${t.skipped} ohne Eintrag übersprungen` : '') + (t.failed ? ` · <span class="err">${t.failed} fehlgeschlagen</span>` : '') +
+    (r ? (r.error ? ` · <span class="err">Regeln fehlgeschlagen</span>` : r.noRules ? '' : ` · ${r.changed} per Regel angepasst`) : '');
+  $('xCancel').classList.toggle('hidden', !busyX);
+  $('xResume').classList.toggle('hidden', busyX || !(job.status === 'paused' || job.status === 'cancelled') || !job.pending);
+  $('xRetry').classList.toggle('hidden', busyX || !job.failed.length || job.status === 'ready');
+  $('xClear').classList.toggle('hidden', !!busyX);
+  $('xFailed').innerHTML = job.failed.length
+    ? job.failed.map((f) => `<tr><td class="date">${f.date ? fmtDay(f.date) : ''}</td><td>${esc(f.name)}</td><td class="err">${esc(f.error || '')}</td></tr>`).join('')
+    : '<tr><td colspan="3" class="muted">keine</td></tr>';
+  $('xLog').innerHTML = job.log.slice().reverse().map((l) =>
+    `<div><span class="muted">${new Date(l.zeit).toLocaleString('de-DE')}</span> ${esc(l.text)}</div>`).join('');
+}
+async function exportAction(action, body) {
+  $('xMsg').textContent = '';
+  try { renderExport(await api('POST', `/api/export/${action}`, body || {})); } catch (e) { $('xMsg').textContent = e.message; }
+  refreshExport();
+}
+$('xRefresh').addEventListener('click', () => refreshExport(true));
+$('xScan').addEventListener('click', () => {
+  if (xLast && xLast.job && xLast.job.pending && xLast.job.status !== 'ready' && xLast.job.status !== 'failed' &&
+      !confirm('Es gibt einen unfertigen Export-Import. Neu prüfen und den alten Stand verwerfen?')) return;
+  exportAction('scan', { source: $('xSource').value });
+});
+$('xStart').addEventListener('click', () => {
+  const j = xLast && xLast.job;
+  if (j && !confirm(`${j.total} Aktivitäten an OpenAthlete übergeben?\n\nSchon vorhandene werden übersprungen. Multisport-Dateien werden geteilt.`)) return;
+  exportAction('start', { applyRules: $('xRules').checked, importUnnamed: $('xUnnamed').checked });
+});
+$('xCancel').addEventListener('click', () => exportAction('cancel'));
+$('xResume').addEventListener('click', () => exportAction('resume'));
+$('xRetry').addEventListener('click', () => exportAction('retry'));
+$('xClear').addEventListener('click', () => { if (confirm('Verlauf des Export-Imports löschen? Importierte Aktivitäten bleiben erhalten.')) exportAction('clear'); });
 
 function renderQuickInfo(q) {
   if (!q) return;

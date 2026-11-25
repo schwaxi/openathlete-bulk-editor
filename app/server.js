@@ -234,6 +234,30 @@ async function applyRulesInRange(tokens, startDate, endDate) {
   return { noRules: false, checked: list.length, changed, failed };
 }
 
+// Aktivitätsdatei an OpenAthlete hochladen (wie der Datei-Upload in der App)
+async function uploadActivityFile(tokens, kind, buffer, filename, name) {
+  const send = async () => {
+    const form = new FormData();
+    form.append('name', name);
+    form.append('file', new Blob([buffer], { type: 'application/octet-stream' }), filename);
+    const res = await fetch(`${API}/activity-import/${kind}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tokens.accessToken}`, Accept: 'application/json' },
+      body: form,
+    });
+    const text = await res.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch { data = { message: text.slice(0, 300) }; }
+    return { status: res.status, ok: res.ok, data };
+  };
+  let r = await send();
+  if (r.status === 401 && (await refresh(tokens))) r = await send();
+  return r;
+}
+
+const { createExportImporter } = require('./export-import');
+const exportImporter = createExportImporter({ dataDir: DATA_DIR, upload: uploadActivityFile, applyRules: applyRulesInRange });
+
 const { createImporter } = require('./garmin-import');
 const importer = createImporter({ authed, dataDir: DATA_DIR, apiError, applyRules: applyRulesInRange });
 
@@ -389,6 +413,26 @@ async function handle(req, res) {
       if (action === 'resume') return send(res, 200, importer.resume(session));
       if (action === 'retry') return send(res, 200, importer.retryFailed(session));
       return send(res, 200, importer.clear());
+    } catch (e) {
+      return send(res, 409, { error: e.message });
+    }
+  }
+
+  // --- Garmin-Export (ZIP aus „Daten exportieren“) --------------------------
+  if (p === '/api/export/status' && req.method === 'GET') {
+    return send(res, 200, { sources: exportImporter.sources(), job: exportImporter.state() });
+  }
+  const em = p.match(/^\/api\/export\/(scan|start|cancel|resume|retry|clear)$/);
+  if (em && req.method === 'POST') {
+    try {
+      const body = await readBody(req);
+      const a = em[1];
+      if (a === 'scan') return send(res, 200, exportImporter.scan(session, body));
+      if (a === 'start') return send(res, 200, exportImporter.start(session, body));
+      if (a === 'cancel') return send(res, 200, exportImporter.cancel());
+      if (a === 'resume') return send(res, 200, exportImporter.resume(session));
+      if (a === 'retry') return send(res, 200, exportImporter.retryFailed(session));
+      return send(res, 200, exportImporter.clear());
     } catch (e) {
       return send(res, 409, { error: e.message });
     }
