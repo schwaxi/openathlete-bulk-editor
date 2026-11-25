@@ -1,0 +1,11 @@
+# Runtime data: rules, change log, import state (personal, never commit)
+data/
+editor-data/
+app/data/
+*.log
+
+# Node / OS
+node_modules/
+.DS_Store
+Thumbs.db
+.env

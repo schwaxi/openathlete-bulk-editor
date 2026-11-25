@@ -1,0 +1,904 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenAthlete Masseneditor</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --text: #1d2330; --muted: #667085;
+    --line: #e2e5ea; --accent: #2563eb; --accent-text: #fff; --ok: #15803d;
+    --err: #b42318; --chg: #fff4d6; --chg-text: #7a4b00; --row-hover: #f0f4ff;
+    --input: #fff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --card: #1b1f27; --text: #e6e8ec; --muted: #98a2b3;
+      --line: #2c323d; --accent: #4f8cff; --accent-text: #0b0f17; --ok: #4ade80;
+      --err: #f97066; --chg: #3a2f12; --chg-text: #ffd27a; --row-hover: #222a38;
+      --input: #12151b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         background: var(--bg); color: var(--text); }
+  header { display: flex; align-items: center; gap: 12px; padding: 12px 20px;
+           background: var(--card); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; }
+  header h1 { font-size: 16px; margin: 0; flex: 1; }
+  header .who { color: var(--muted); }
+  main { padding: 16px 20px 40px; max-width: 1500px; margin: 0 auto; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+  .card h2 { font-size: 14px; margin: 0 0 10px; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end; }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+  label.inline { flex-direction: row; align-items: center; gap: 6px; color: var(--text); font-size: 13px; }
+  input, select, button { font: inherit; }
+  input[type=text], input[type=email], input[type=password], input[type=date], input[type=number], select {
+    padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--input); color: var(--text); min-width: 0; }
+  input[type=number] { width: 80px; }
+  button { padding: 7px 14px; border-radius: 6px; border: 1px solid var(--line); background: var(--card);
+           color: var(--text); cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.small { padding: 3px 8px; font-size: 12px; }
+  .muted { color: var(--muted); }
+  .err { color: var(--err); }
+  .ok { color: var(--ok); }
+  .hidden { display: none !important; }
+  #login { max-width: 380px; margin: 60px auto; }
+  #login form { display: flex; flex-direction: column; gap: 10px; }
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 14px; align-items: start; }
+  @media (max-width: 1000px) { .layout { grid-template-columns: 1fr; } }
+  .side { position: sticky; top: 64px; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+  .tabs button { border-radius: 6px 6px 0 0; }
+  .tabs button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .tablewrap { overflow: auto; max-height: calc(100vh - 260px); border: 1px solid var(--line); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { position: sticky; top: 0; background: var(--card); z-index: 1; font-weight: 600; white-space: nowrap; }
+  tbody tr:hover { background: var(--row-hover); }
+  td.num { text-align: right; white-space: nowrap; }
+  td.date { white-space: nowrap; }
+  .chg { background: var(--chg); color: var(--chg-text); border-radius: 4px; padding: 0 4px; }
+  .arrow { color: var(--muted); }
+  .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+  .field > .title { font-weight: 600; font-size: 13px; }
+  .stack { display: flex; flex-direction: column; gap: 8px; }
+  .hint { font-size: 12px; color: var(--muted); }
+  code { background: var(--bg); padding: 0 4px; border-radius: 4px; font-size: 12px; }
+  .progress { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
+  .progress > div { height: 100%; background: var(--accent); width: 0; transition: width .2s; }
+  .rule { display: grid; grid-template-columns: 1fr auto; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; }
+  .rule .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .rule input[type=text], .rule select { width: 100%; }
+  .rule select[data-k=onlySport] { grid-column: 1 / -1; }
+  .summary { padding: 8px 10px; background: var(--bg); border-radius: 6px; margin: 8px 0; }
+  ul.errors { margin: 6px 0 0; padding-left: 18px; max-height: 160px; overflow: auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>OpenAthlete Masseneditor</h1>
+  <nav id="nav" class="tabs hidden" style="margin:0">
+    <button id="navEdit" class="active">Bearbeiten</button>
+    <button id="navGarmin">Garmin-Import</button>
+  </nav>
+  <span class="who" id="who"></span>
+  <button id="logoutBtn" class="small hidden">Abmelden</button>
+</header>
+
+<main>
+  <!-- Anmeldung -->
+  <section id="login" class="card hidden">
+    <h2>Mit deinem OpenAthlete-Konto anmelden</h2>
+    <form id="loginForm">
+      <label>E-Mail <input type="email" id="email" autocomplete="username" required></label>
+      <label>Passwort <input type="password" id="password" autocomplete="current-password" required></label>
+      <button class="primary" type="submit">Anmelden</button>
+      <div id="loginMsg" class="err"></div>
+      <div class="hint">Die Anmeldung läuft direkt gegen deinen eigenen OpenAthlete-Server. Das Passwort wird nicht gespeichert.</div>
+    </form>
+  </section>
+
+  <!-- Garmin-Verlauf-Import -->
+  <section id="garminView" class="hidden">
+    <div class="card">
+      <h2>Garmin-Verlauf importieren</h2>
+      <div id="gConn" class="summary">Prüfe Garmin-Verbindung …</div>
+      <div class="hint" style="margin-bottom:10px">
+        OpenAthlete importiert pro Auftrag höchstens 28 Tage und nimmt höchstens 3 Aufträge pro 15 Minuten an.
+        Der Editor teilt deinen Zeitraum deshalb in Abschnitte und arbeitet sie nacheinander ab.
+        Das läuft im Container weiter, du kannst dieses Fenster schließen.
+        Schon vorhandene Aktivitäten überspringt OpenAthlete selbst.
+      </div>
+      <div class="row">
+        <label>Von <input type="date" id="gFrom"></label>
+        <label>Bis <input type="date" id="gTo"></label>
+        <label>Reihenfolge
+          <select id="gOrder">
+            <option value="desc">neueste zuerst</option>
+            <option value="asc">älteste zuerst</option>
+          </select>
+        </label>
+        <button class="primary" id="gStart">Import starten</button>
+      </div>
+      <div id="gEstimate" class="hint" style="margin-top:6px"></div>
+      <div id="gStartMsg" class="err" style="margin-top:6px"></div>
+    </div>
+
+    <div class="card hidden" id="gJobCard">
+      <h2 id="gJobTitle">Import</h2>
+      <div class="progress"><div id="gBar"></div></div>
+      <div id="gPhase" style="margin-top:8px"></div>
+      <div id="gTotals" class="summary"></div>
+      <div class="row" style="margin-bottom:10px">
+        <button id="gCancel" class="hidden">Abbrechen</button>
+        <button id="gResume" class="primary hidden">Fortsetzen</button>
+        <button id="gRetry" class="hidden">Fehlgeschlagene wiederholen</button>
+        <button id="gClear" class="hidden">Import-Verlauf löschen</button>
+        <span id="gActionMsg" class="err"></span>
+      </div>
+      <div class="layout" style="grid-template-columns: minmax(0,1fr) minmax(0,1fr)">
+        <div>
+          <strong>Abschnitte</strong>
+          <div class="tablewrap" style="max-height:360px;margin-top:6px">
+            <table>
+              <thead><tr><th>Zeitraum</th><th>Status</th><th>Ergebnis</th></tr></thead>
+              <tbody id="gChunks"></tbody>
+            </table>
+          </div>
+        </div>
+        <div>
+          <strong>Protokoll</strong>
+          <div class="tablewrap" style="max-height:360px;margin-top:6px;padding:6px 8px;font-size:12px" id="gLog"></div>
+        </div>
+      </div>
+      <div class="hint" style="margin-top:8px">Tipp: Danach unter „Bearbeiten“ → „Regeln“ deine Kürzel-Regeln auf die neuen Aktivitäten anwenden.</div>
+    </div>
+  </section>
+
+  <!-- Editor -->
+  <section id="app" class="hidden">
+    <div class="card">
+      <div class="row">
+        <label>Von <input type="date" id="from"></label>
+        <label>Bis <input type="date" id="to"></label>
+        <button class="primary" id="loadBtn">Aktivitäten laden</button>
+        <span id="loadMsg" class="muted"></span>
+      </div>
+      <div class="hint" style="margin-top:6px">Leer lassen = alle Aktivitäten laden.</div>
+    </div>
+
+    <div class="layout">
+      <div>
+        <div class="card">
+          <h2>Filter</h2>
+          <div class="row">
+            <label style="flex:1;min-width:200px">Name enthält
+              <input type="text" id="fName" placeholder="z. B. M9">
+            </label>
+            <label class="inline"><input type="checkbox" id="fWord" checked> ganzes Wort</label>
+            <label class="inline"><input type="checkbox" id="fRegex"> Regex</label>
+            <label>Sportart <select id="fSport"></select></label>
+            <label>Ausrüstung <select id="fEquip"></select></label>
+            <button id="fReset" class="small">Filter zurücksetzen</button>
+          </div>
+          <div class="hint" style="margin-top:6px">„ganzes Wort“: <code>M9</code> findet „Tour M9“, aber nicht „M95“. Groß-/Kleinschreibung ist egal. Platzhalter: <code>*</code> beliebig viele Zeichen, <code>?</code> genau ein Zeichen (z. B. <code>M9*Pendeln</code>, <code>M?</code>).</div>
+        </div>
+
+        <div class="card">
+          <div class="row" style="margin-bottom:8px;align-items:center">
+            <strong id="countInfo">0 Aktivitäten</strong>
+            <button class="small" id="selAll">Alle gefilterten auswählen</button>
+            <button class="small" id="selNone">Auswahl aufheben</button>
+          </div>
+          <div class="tablewrap">
+            <table>
+              <thead>
+                <tr>
+                  <th><input type="checkbox" id="chkAll" title="Alle sichtbaren auswählen"></th>
+                  <th>Datum</th><th>Name</th><th>Sportart</th><th>Ausrüstung</th>
+                  <th class="num">km</th><th class="num">Zeit</th>
+                </tr>
+              </thead>
+              <tbody id="tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="side">
+        <div class="tabs">
+          <button id="tabBulk" class="active">Massenänderung</button>
+          <button id="tabRules">Regeln</button>
+        </div>
+
+        <!-- Massenänderung -->
+        <div class="card" id="panelBulk">
+          <h2>Für die ausgewählten Aktivitäten</h2>
+
+          <div class="field">
+            <span class="title">Sportart</span>
+            <select id="bSport"></select>
+          </div>
+
+          <div class="field">
+            <span class="title">Ausrüstung</span>
+            <select id="bEquip"></select>
+          </div>
+
+          <div class="field">
+            <span class="title">Name</span>
+            <div class="stack">
+              <label class="inline"><input type="radio" name="nmode" value="keep" checked> unverändert</label>
+              <label class="inline"><input type="radio" name="nmode" value="replace"> Suchen &amp; Ersetzen</label>
+              <div id="nReplace" class="stack hidden" style="padding-left:22px">
+                <label>Suchen <input type="text" id="nFind"></label>
+                <label>Ersetzen durch <input type="text" id="nRepl"></label>
+              </div>
+              <label class="inline"><input type="radio" name="nmode" value="template"> Neuer Name nach Vorlage</label>
+              <div id="nTemplate" class="stack hidden" style="padding-left:22px">
+                <label>Vorlage <input type="text" id="nTpl" value="{name}"></label>
+                <div class="hint">
+                  Platzhalter: <code>{name}</code> bisheriger Name, <code>{nr}</code> fortlaufende Nummer,
+                  <code>{datum}</code> 2026-11-25, <code>{tag}</code> <code>{monat}</code> <code>{jahr}</code>,
+                  <code>{km}</code>, <code>{rad}</code> Ausrüstung, <code>{sport}</code>
+                </div>
+                <div class="row">
+                  <label>Nummer ab <input type="number" id="nStart" value="1"></label>
+                  <label>Stellen <input type="number" id="nPad" value="1" min="1" max="6"></label>
+                  <label>Reihenfolge
+                    <select id="nOrder">
+                      <option value="asc">älteste zuerst</option>
+                      <option value="desc">neueste zuerst</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="summary" id="bSummary">Keine Aktivitäten ausgewählt.</div>
+          <button class="primary" id="bApply" disabled>Änderungen anwenden</button>
+        </div>
+
+        <!-- Regeln -->
+        <div class="card hidden" id="panelRules">
+          <h2>Regeln nach Kürzel im Namen</h2>
+          <div class="hint" style="margin-bottom:8px">Beispiel: Kürzel <code>M9</code> → Sportart Velomobil und Ausrüstung „Velomobil M9“. Die Regeln werden auf dem Server gespeichert.</div>
+          <div id="rulesList"></div>
+          <div class="row" style="margin:6px 0 10px">
+            <button class="small" id="ruleAdd">+ Regel</button>
+            <button class="small" id="ruleSave">Regeln speichern</button>
+            <span id="ruleMsg" class="muted"></span>
+          </div>
+          <label class="inline" style="margin-bottom:4px"><input type="checkbox" id="rOnlyHits" checked> in der Tabelle nur betroffene zeigen</label>
+          <label class="inline" style="margin-bottom:8px"><input type="checkbox" id="rOnlyFiltered"> nur auf die gefilterten Aktivitäten anwenden</label>
+          <div class="summary" id="rSummary">Lade Aktivitäten, um die Regeln zu prüfen.</div>
+          <button class="primary" id="rApply" disabled>Regeln anwenden</button>
+        </div>
+
+        <!-- Fortschritt / Ergebnis -->
+        <div class="card hidden" id="runCard">
+          <h2 id="runTitle">Wird angewendet …</h2>
+          <div class="progress"><div id="runBar"></div></div>
+          <div id="runMsg" style="margin-top:8px"></div>
+          <ul class="errors err" id="runErrors"></ul>
+          <div class="row" style="margin-top:10px">
+            <button id="undoBtn" class="hidden">Letzte Änderung rückgängig machen</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+'use strict';
+
+// --------------------------------------------------------------------------
+// Sportarten (Werte aus OpenAthlete, deutsche Bezeichnungen)
+// --------------------------------------------------------------------------
+const SPORTS = {
+  CYCLING: 'Radfahren', GRAVEL_RIDE: 'Gravel', MOUNTAIN_BIKE_RIDE: 'Mountainbike',
+  E_BIKE_RIDE: 'E-Bike', E_MOUNTAIN_BIKE_RIDE: 'E-Mountainbike', VIRTUAL_RIDE: 'Rad (virtuell/indoor)',
+  VELOMOBILE: 'Velomobil', HANDCYCLE: 'Handbike',
+  RUNNING: 'Laufen', TRAIL_RUNNING: 'Trailrunning', VIRTUAL_RUN: 'Laufen (virtuell/indoor)', WALK: 'Gehen',
+  HIKING: 'Wandern', SWIMMING: 'Schwimmen', ROWING: 'Rudern', VIRTUAL_ROW: 'Rudern (indoor)',
+  CANOEING: 'Kanu', KAYAKING: 'Kajak', STAND_UP_PADDLING: 'Stand-up-Paddling', SAIL: 'Segeln',
+  SURFING: 'Surfen', WINDSURF: 'Windsurfen', KITESURF: 'Kitesurfen',
+  ALPINE_SKI: 'Ski alpin', BACKCOUNTRY_SKI: 'Skitour', NORDIC_SKI: 'Skilanglauf', ROLLER_SKI: 'Skiroller',
+  SNOWBOARD: 'Snowboard', SNOWSHOE: 'Schneeschuh', ICE_SKATE: 'Eislaufen', INLINE_SKATE: 'Inlineskaten',
+  SKATEBOARD: 'Skateboard', WHEELCHAIR: 'Rollstuhl',
+  STRENGTH: 'Kraft', WEIGHT_TRAINING: 'Gewichtstraining', CROSSFIT: 'CrossFit',
+  HIGH_INTENSITY_INTERVAL_TRAINING: 'HIIT', WORKOUT: 'Workout', MOBILITY: 'Mobilität', YOGA: 'Yoga',
+  PILATES: 'Pilates', ELLIPTICAL: 'Crosstrainer', STAIR_STEPPER: 'Stepper', ROCK_CLIMBING: 'Klettern',
+  MARTIAL_ARTS: 'Kampfsport', SOCCER: 'Fußball', TENNIS: 'Tennis', TABLE_TENNIS: 'Tischtennis',
+  BADMINTON: 'Badminton', SQUASH: 'Squash', RACQUETBALL: 'Racquetball', PICKLEBALL: 'Pickleball',
+  GOLF: 'Golf', TRIATHLON: 'Triathlon', DUATHLON: 'Duathlon', AQUATHLON: 'Aquathlon',
+  AQUABIKE: 'Aquabike', OTHER: 'Sonstiges',
+};
+const sportName = (s) => SPORTS[s] || s || '–';
+
+// --------------------------------------------------------------------------
+// Zustand
+// --------------------------------------------------------------------------
+let activities = [];      // alle geladenen Aktivitäten
+let equipment = [];       // Ausrüstung des Kontos
+let selected = new Set(); // ausgewählte eventIds
+let rules = [];
+let mode = 'bulk';        // 'bulk' | 'rules'
+let busy = false;
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+async function api(method, url, body) {
+  const res = await fetch(url, {
+    method,
+    headers: body !== undefined ? { 'Content-Type': 'application/json' } : {},
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+    credentials: 'same-origin',
+  });
+  let data = null;
+  try { data = await res.json(); } catch { /* leer */ }
+  if (res.status === 401 && url !== '/api/login') { showLogin(); }
+  if (!res.ok) throw new Error((data && data.error) || `Fehler ${res.status}`);
+  return data;
+}
+
+// --------------------------------------------------------------------------
+// Anmeldung
+// --------------------------------------------------------------------------
+let view = 'edit'; // 'edit' | 'garmin'
+function showLogin() {
+  $('login').classList.remove('hidden');
+  $('app').classList.add('hidden');
+  $('garminView').classList.add('hidden');
+  $('nav').classList.add('hidden');
+  $('logoutBtn').classList.add('hidden');
+  $('who').textContent = '';
+  stopGarminPoll();
+}
+function showApp(email) {
+  $('login').classList.add('hidden');
+  $('nav').classList.remove('hidden');
+  $('logoutBtn').classList.remove('hidden');
+  $('who').textContent = email || '';
+  setView(view);
+}
+function setView(v) {
+  view = v;
+  $('navEdit').classList.toggle('active', v === 'edit');
+  $('navGarmin').classList.toggle('active', v === 'garmin');
+  $('app').classList.toggle('hidden', v !== 'edit');
+  $('garminView').classList.toggle('hidden', v !== 'garmin');
+  if (v === 'garmin') startGarminPoll(); else stopGarminPoll();
+}
+
+$('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('loginMsg').textContent = '';
+  try {
+    const r = await api('POST', '/api/login', { email: $('email').value, password: $('password').value });
+    $('password').value = '';
+    showApp(r.email);
+    await init();
+  } catch (err) {
+    $('loginMsg').textContent = err.message;
+  }
+});
+$('logoutBtn').addEventListener('click', async () => {
+  await api('POST', '/api/logout').catch(() => {});
+  activities = []; selected.clear(); showLogin();
+});
+
+// --------------------------------------------------------------------------
+// Laden
+// --------------------------------------------------------------------------
+async function init() {
+  try {
+    equipment = await api('GET', '/api/equipment');
+  } catch (e) { equipment = []; }
+  try { rules = await api('GET', '/api/rules'); } catch { rules = []; }
+  fillSelects();
+  renderRules();
+  await loadActivities();
+}
+
+async function loadActivities() {
+  $('loadMsg').textContent = 'Lade …';
+  $('loadBtn').disabled = true;
+  try {
+    const qs = new URLSearchParams();
+    if ($('from').value) qs.set('from', $('from').value);
+    if ($('to').value) qs.set('to', $('to').value);
+    activities = await api('GET', '/api/activities' + (qs.toString() ? '?' + qs : ''));
+    const ids = new Set(activities.map((a) => a.eventId));
+    selected = new Set([...selected].filter((id) => ids.has(id)));
+    $('loadMsg').textContent = `${activities.length} Aktivitäten geladen.`;
+  } catch (e) {
+    $('loadMsg').innerHTML = `<span class="err">${esc(e.message)}</span>`;
+  } finally {
+    $('loadBtn').disabled = false;
+  }
+  render();
+}
+$('loadBtn').addEventListener('click', loadActivities);
+
+function equipOptions(includeKeep, includeAll) {
+  let html = '';
+  if (includeAll) html += '<option value="__all">Alle</option>';
+  if (includeKeep) html += '<option value="__keep">unverändert</option>';
+  html += '<option value="__none">– keine –</option>';
+  for (const e of equipment) {
+    html += `<option value="${e.equipmentId}">${esc(e.name)}${e.type === 'SHOE' ? ' (Schuh)' : ''}</option>`;
+  }
+  return html;
+}
+function sportOptions(first) {
+  let html = first;
+  for (const [k, v] of Object.entries(SPORTS)) html += `<option value="${k}">${esc(v)}</option>`;
+  return html;
+}
+function fillSelects() {
+  $('fSport').innerHTML = sportOptions('<option value="__all">Alle</option>');
+  $('bSport').innerHTML = sportOptions('<option value="__keep">unverändert</option>');
+  $('fEquip').innerHTML = equipOptions(false, true);
+  $('bEquip').innerHTML = equipOptions(true, false);
+}
+
+// --------------------------------------------------------------------------
+// Filter
+// --------------------------------------------------------------------------
+function makeMatcher(text, word, regex) {
+  if (!text) return () => true;
+  let re;
+  try {
+    // Ohne Regex: * = beliebig viele Zeichen, ? = genau ein Zeichen
+    const src = regex ? text : text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\*/g, '.*').replace(/\\\?/g, '.');
+    re = word ? new RegExp(`(?<![\\p{L}\\p{N}])(?:${src})(?![\\p{L}\\p{N}])`, 'iu') : new RegExp(src, 'iu');
+  } catch {
+    return null; // ungültiger Regex
+  }
+  return (name) => re.test(name || '');
+}
+
+function filtered() {
+  const m = makeMatcher($('fName').value.trim(), $('fWord').checked, $('fRegex').checked);
+  $('fName').style.borderColor = m ? '' : 'var(--err)';
+  if (!m) return [];
+  const sp = $('fSport').value;
+  const eq = $('fEquip').value;
+  return activities.filter((a) =>
+    m(a.name) &&
+    (sp === '__all' || a.sport === sp) &&
+    (eq === '__all' || (eq === '__none' ? a.equipmentId == null : String(a.equipmentId) === eq)));
+}
+
+for (const id of ['fName', 'fWord', 'fRegex', 'fSport', 'fEquip']) {
+  $(id).addEventListener('input', render);
+  $(id).addEventListener('change', render);
+}
+$('fReset').addEventListener('click', () => {
+  $('fName').value = ''; $('fRegex').checked = false; $('fWord').checked = true;
+  $('fSport').value = '__all'; $('fEquip').value = '__all'; render();
+});
+
+// --------------------------------------------------------------------------
+// Geplante Änderungen berechnen
+// --------------------------------------------------------------------------
+function pad(n, w) { return String(n).padStart(w, '0'); }
+function fmtDate(iso) { const d = new Date(iso); return `${pad(d.getDate(), 2)}.${pad(d.getMonth() + 1, 2)}.${d.getFullYear()}`; }
+function isoDate(iso) { const d = new Date(iso); return `${d.getFullYear()}-${pad(d.getMonth() + 1, 2)}-${pad(d.getDate(), 2)}`; }
+function fmtKm(m) { return m == null ? '' : (m / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1, minimumFractionDigits: 1 }); }
+function fmtTime(s) { if (s == null) return ''; const h = Math.floor(s / 3600), mi = Math.floor((s % 3600) / 60); return `${h}:${pad(mi, 2)}`; }
+function equipName(id) { if (id == null) return ''; const e = equipment.find((x) => x.equipmentId === id); return e ? e.name : `#${id}`; }
+
+function nameMode() { return document.querySelector('input[name=nmode]:checked').value; }
+
+// Liefert Map eventId -> { sport?, equipmentId?, name? } (nur echte Änderungen)
+function plannedBulk() {
+  const plan = new Map();
+  const sel = activities.filter((a) => selected.has(a.eventId));
+  const sp = $('bSport').value;
+  const eq = $('bEquip').value;
+  const nm = nameMode();
+  let order = sel;
+  if (nm === 'template') {
+    order = [...sel].sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+    if ($('nOrder').value === 'desc') order.reverse();
+  }
+  const start = parseInt($('nStart').value, 10) || 0;
+  const width = Math.min(Math.max(parseInt($('nPad').value, 10) || 1, 1), 6);
+  order.forEach((a, i) => {
+    const ch = {};
+    const newSport = sp !== '__keep' ? sp : a.sport;
+    const newEquip = eq === '__keep' ? a.equipmentId : eq === '__none' ? null : Number(eq);
+    if (newSport !== a.sport) ch.sport = newSport;
+    if ((newEquip ?? null) !== (a.equipmentId ?? null)) ch.equipmentId = newEquip;
+    let newName = a.name;
+    if (nm === 'replace' && $('nFind').value) {
+      newName = a.name.split($('nFind').value).join($('nRepl').value);
+    } else if (nm === 'template') {
+      const d = new Date(a.startDate);
+      newName = $('nTpl').value.replace(/\{(\w+)\}/g, (all, key) => {
+        switch (key) {
+          case 'name': return a.name;
+          case 'nr': return pad(start + i, width);
+          case 'datum': return isoDate(a.startDate);
+          case 'tag': return pad(d.getDate(), 2);
+          case 'monat': return pad(d.getMonth() + 1, 2);
+          case 'jahr': return String(d.getFullYear());
+          case 'km': return fmtKm(a.distance);
+          case 'rad': return equipName(newEquip);
+          case 'sport': return sportName(newSport);
+          default: return all;
+        }
+      });
+    }
+    newName = newName.replace(/\s+/g, ' ').trim();
+    if (newName !== a.name) ch.name = newName;
+    if (Object.keys(ch).length) plan.set(a.eventId, ch);
+  });
+  return plan;
+}
+
+function plannedRules() {
+  const plan = new Map();
+  const pool = $('rOnlyFiltered').checked ? filtered() : activities;
+  const compiled = rules
+    .filter((r) => r.keyword && r.keyword.trim())
+    .map((r) => ({ ...r, match: makeMatcher(r.keyword.trim(), r.word !== false, false) }));
+  for (const a of pool) {
+    const ch = {};
+    for (const r of compiled) {
+      if (!r.match(a.name)) continue;
+      if (r.onlySport && r.onlySport !== a.sport) continue;
+      if (r.sport && r.sport !== a.sport && ch.sport === undefined) ch.sport = r.sport;
+      if (r.equipment && r.equipment !== '') {
+        const v = r.equipment === '__none' ? null : Number(r.equipment);
+        if ((v ?? null) !== (a.equipmentId ?? null) && ch.equipmentId === undefined) ch.equipmentId = v;
+      }
+    }
+    if (Object.keys(ch).length) plan.set(a.eventId, ch);
+  }
+  return plan;
+}
+
+function currentPlan() { return mode === 'rules' ? plannedRules() : plannedBulk(); }
+
+// --------------------------------------------------------------------------
+// Darstellung
+// --------------------------------------------------------------------------
+function cell(oldText, newText, changed) {
+  if (!changed) return esc(oldText);
+  return `<span class="muted"><s>${esc(oldText) || '–'}</s></span> <span class="arrow">→</span> <span class="chg">${esc(newText) || '– keine –'}</span>`;
+}
+
+function render() {
+  let list = filtered();
+  const plan = currentPlan();
+  // im Regel-Modus auf Wunsch nur die betroffenen Aktivitäten zeigen
+  if (mode === 'rules' && $('rOnlyHits').checked) list = list.filter((a) => plan.has(a.eventId));
+  const rows = list.slice(0, 3000);
+  let html = '';
+  for (const a of rows) {
+    const ch = plan.get(a.eventId) || {};
+    const checked = selected.has(a.eventId) ? 'checked' : '';
+    html += `<tr data-id="${a.eventId}">
+      <td><input type="checkbox" class="rowchk" ${checked} ${mode === 'rules' ? 'disabled' : ''}></td>
+      <td class="date">${fmtDate(a.startDate)}</td>
+      <td>${cell(a.name, ch.name, 'name' in ch)}</td>
+      <td>${cell(sportName(a.sport), sportName(ch.sport), 'sport' in ch)}</td>
+      <td>${cell(a.equipmentName || equipName(a.equipmentId), equipName(ch.equipmentId), 'equipmentId' in ch)}</td>
+      <td class="num">${fmtKm(a.distance)}</td>
+      <td class="num">${fmtTime(a.movingTime)}</td>
+    </tr>`;
+  }
+  if (!rows.length) {
+    const msg = !activities.length ? 'Noch keine Aktivitäten geladen.'
+      : mode === 'rules' && $('rOnlyHits').checked ? 'Keine Aktivität betroffen: alles passt schon zu den Regeln.'
+      : 'Keine Aktivitäten passen zum Filter.';
+    html = `<tr><td colspan="7" class="muted">${msg}</td></tr>`;
+  }
+  if (list.length > rows.length) html += `<tr><td colspan="7" class="muted">… und ${list.length - rows.length} weitere (Filter enger stellen, um sie zu sehen; Auswahl wirkt trotzdem auf alle).</td></tr>`;
+  $('tbody').innerHTML = html;
+
+  const selVisible = list.filter((a) => selected.has(a.eventId)).length;
+  $('countInfo').textContent = `${list.length} von ${activities.length} Aktivitäten · ${selected.size} ausgewählt`;
+  $('chkAll').checked = list.length > 0 && selVisible === list.length;
+  $('chkAll').indeterminate = selVisible > 0 && selVisible < list.length;
+  $('chkAll').disabled = mode === 'rules';
+
+  if (mode === 'bulk') {
+    if (!selected.size) {
+      $('bSummary').textContent = 'Keine Aktivitäten ausgewählt.';
+    } else {
+      const tooLong = [...plan.values()].filter((c) => c.name !== undefined && (c.name.length > 100 || c.name.length < 1)).length;
+      $('bSummary').innerHTML = `${selected.size} ausgewählt · <strong>${plan.size}</strong> werden geändert` +
+        (tooLong ? `<br><span class="err">${tooLong} Namen sind leer oder länger als 100 Zeichen.</span>` : '');
+    }
+    $('bApply').disabled = busy || plan.size === 0;
+  } else {
+    $('rSummary').innerHTML = activities.length
+      ? `<strong>${plan.size}</strong> Aktivitäten würden durch die Regeln geändert. Die Tabelle zeigt die Vorschau.`
+      : 'Lade Aktivitäten, um die Regeln zu prüfen.';
+    $('rApply').disabled = busy || plan.size === 0;
+  }
+}
+
+$('tbody').addEventListener('change', (e) => {
+  if (!e.target.classList.contains('rowchk')) return;
+  const id = Number(e.target.closest('tr').dataset.id);
+  if (e.target.checked) selected.add(id); else selected.delete(id);
+  render();
+});
+$('chkAll').addEventListener('change', (e) => {
+  for (const a of filtered()) { if (e.target.checked) selected.add(a.eventId); else selected.delete(a.eventId); }
+  render();
+});
+$('selAll').addEventListener('click', () => { for (const a of filtered()) selected.add(a.eventId); render(); });
+$('selNone').addEventListener('click', () => { selected.clear(); render(); });
+
+for (const id of ['bSport', 'bEquip', 'nFind', 'nRepl', 'nTpl', 'nStart', 'nPad', 'nOrder', 'rOnlyFiltered', 'rOnlyHits']) {
+  $(id).addEventListener('input', render);
+  $(id).addEventListener('change', render);
+}
+document.querySelectorAll('input[name=nmode]').forEach((r) => r.addEventListener('change', () => {
+  $('nReplace').classList.toggle('hidden', nameMode() !== 'replace');
+  $('nTemplate').classList.toggle('hidden', nameMode() !== 'template');
+  render();
+}));
+
+function setMode(m) {
+  mode = m;
+  $('tabBulk').classList.toggle('active', m === 'bulk');
+  $('tabRules').classList.toggle('active', m === 'rules');
+  $('panelBulk').classList.toggle('hidden', m !== 'bulk');
+  $('panelRules').classList.toggle('hidden', m !== 'rules');
+  render();
+}
+$('tabBulk').addEventListener('click', () => setMode('bulk'));
+$('tabRules').addEventListener('click', () => setMode('rules'));
+
+// --------------------------------------------------------------------------
+// Regeln bearbeiten
+// --------------------------------------------------------------------------
+function renderRules() {
+  const sportSel = (val, first) => `<select data-k="${first === 'Sportart: unverändert' ? 'sport' : 'onlySport'}">` +
+    `<option value="">${first}</option>` +
+    Object.entries(SPORTS).map(([k, v]) => `<option value="${k}" ${val === k ? 'selected' : ''}>${esc(v)}</option>`).join('') + '</select>';
+  const equipSel = (val) => '<select data-k="equipment"><option value="">Ausrüstung: unverändert</option>' +
+    `<option value="__none" ${val === '__none' ? 'selected' : ''}>– keine –</option>` +
+    equipment.map((e) => `<option value="${e.equipmentId}" ${String(val) === String(e.equipmentId) ? 'selected' : ''}>${esc(e.name)}</option>`).join('') + '</select>';
+  $('rulesList').innerHTML = rules.length ? rules.map((r, i) => `
+    <div class="rule" data-i="${i}">
+      <div class="grid">
+        <input type="text" data-k="keyword" placeholder="Kürzel, z. B. M9" value="${esc(r.keyword)}">
+        <label class="inline"><input type="checkbox" data-k="word" ${r.word !== false ? 'checked' : ''}> ganzes Wort</label>
+        ${sportSel(r.sport, 'Sportart: unverändert')}
+        ${equipSel(r.equipment)}
+        ${sportSel(r.onlySport, 'nur wenn Sportart: egal')}
+      </div>
+      <button class="small" data-del="${i}" title="Regel löschen">✕</button>
+    </div>`).join('') : '<div class="muted" style="margin-bottom:8px">Noch keine Regeln.</div>';
+}
+$('rulesList').addEventListener('input', (e) => {
+  const box = e.target.closest('.rule'); if (!box) return;
+  const r = rules[Number(box.dataset.i)]; const k = e.target.dataset.k;
+  r[k] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+  $('ruleMsg').textContent = 'nicht gespeichert';
+  render();
+});
+$('rulesList').addEventListener('click', (e) => {
+  const i = e.target.dataset.del; if (i === undefined) return;
+  rules.splice(Number(i), 1); renderRules(); $('ruleMsg').textContent = 'nicht gespeichert'; render();
+});
+$('ruleAdd').addEventListener('click', () => {
+  rules.push({ keyword: '', word: true, sport: '', equipment: '', onlySport: '' });
+  renderRules(); $('ruleMsg').textContent = 'nicht gespeichert';
+});
+$('ruleSave').addEventListener('click', async () => {
+  try { await api('PUT', '/api/rules', rules); $('ruleMsg').innerHTML = '<span class="ok">gespeichert</span>'; }
+  catch (e) { $('ruleMsg').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+});
+
+// --------------------------------------------------------------------------
+// Anwenden + Rückgängig
+// --------------------------------------------------------------------------
+async function runChanges(plan, title) {
+  const items = [...plan.entries()];
+  if (!items.length) return;
+  busy = true; render();
+  $('runCard').classList.remove('hidden');
+  $('runTitle').textContent = title;
+  $('runErrors').innerHTML = '';
+  $('undoBtn').classList.add('hidden');
+  const undo = [];
+  let done = 0, ok = 0;
+  const errors = [];
+  const queue = items.slice();
+  async function worker() {
+    while (queue.length) {
+      const [eventId, ch] = queue.shift();
+      const a = activities.find((x) => x.eventId === eventId);
+      const before = { name: a.name, sport: a.sport, equipmentId: a.equipmentId ?? null };
+      try {
+        const updated = await api('PATCH', `/api/activities/${eventId}`, { ...ch, before });
+        const back = {};
+        for (const k of Object.keys(ch)) back[k] = before[k];
+        undo.push([eventId, back]);
+        Object.assign(a, ch);
+        if ('equipmentId' in ch) a.equipmentName = updated && updated.equipmentName !== undefined ? updated.equipmentName : equipName(ch.equipmentId);
+        ok++;
+      } catch (e) {
+        errors.push(`${fmtDate(a.startDate)} „${a.name}“: ${e.message}`);
+      }
+      done++;
+      $('runBar').style.width = `${Math.round((done / items.length) * 100)}%`;
+      $('runMsg').textContent = `${done} / ${items.length} bearbeitet`;
+    }
+  }
+  await Promise.all([worker(), worker(), worker()]);
+  busy = false;
+  $('runTitle').textContent = errors.length ? 'Fertig, mit Fehlern' : 'Fertig';
+  $('runMsg').innerHTML = `<span class="ok">${ok} Aktivitäten geändert.</span>` + (errors.length ? ` <span class="err">${errors.length} fehlgeschlagen.</span>` : '');
+  $('runErrors').innerHTML = errors.map((e) => `<li>${esc(e)}</li>`).join('');
+  if (undo.length) {
+    try { localStorage.setItem('oaed_undo', JSON.stringify(undo)); } catch { /* egal */ }
+    $('undoBtn').classList.remove('hidden');
+  }
+  render();
+}
+
+function confirmText(plan) {
+  const vals = [...plan.values()];
+  const n = (k) => vals.filter((c) => k in c).length;
+  return `${plan.size} Aktivitäten ändern?\n\n` +
+    `Sportart: ${n('sport')}\nAusrüstung: ${n('equipmentId')}\nName: ${n('name')}\n\n` +
+    'Die Änderung kann danach mit „Rückgängig“ zurückgenommen werden.';
+}
+
+$('bApply').addEventListener('click', () => {
+  const plan = plannedBulk();
+  const bad = [...plan.values()].some((c) => c.name !== undefined && (c.name.length > 100 || c.name.length < 1));
+  if (bad) { alert('Einige neue Namen sind leer oder länger als 100 Zeichen. Bitte Vorlage anpassen.'); return; }
+  if (confirm(confirmText(plan))) runChanges(plan, 'Massenänderung wird angewendet …');
+});
+$('rApply').addEventListener('click', () => {
+  const plan = plannedRules();
+  if (confirm(confirmText(plan))) runChanges(plan, 'Regeln werden angewendet …');
+});
+$('undoBtn').addEventListener('click', () => {
+  let undo = [];
+  try { undo = JSON.parse(localStorage.getItem('oaed_undo') || '[]'); } catch { /* leer */ }
+  const plan = new Map(undo.filter(([id]) => activities.some((a) => a.eventId === id)));
+  if (!plan.size) { alert('Nichts zum Rückgängigmachen gefunden.'); return; }
+  if (confirm(`${plan.size} Aktivitäten auf den vorherigen Stand zurücksetzen?`)) {
+    runChanges(plan, 'Wird rückgängig gemacht …').then(() => { try { localStorage.removeItem('oaed_undo'); } catch {} });
+  }
+});
+
+// --------------------------------------------------------------------------
+// Garmin-Verlauf-Import
+// --------------------------------------------------------------------------
+let gTimer = null;
+let gLast = null;
+const G_STATUS = {
+  pending: ['offen', 'muted'], done: ['fertig', 'ok'], partial: ['teilweise', 'err'], failed: ['Fehler', 'err'],
+};
+const JOB_STATUS = {
+  running: 'Import läuft', paused: 'Import angehalten', cancelled: 'Import abgebrochen', done: 'Import abgeschlossen',
+};
+
+function startGarminPoll() {
+  stopGarminPoll();
+  refreshGarmin();
+  gTimer = setInterval(refreshGarmin, 3000);
+}
+function stopGarminPoll() { if (gTimer) clearInterval(gTimer); gTimer = null; }
+$('navEdit').addEventListener('click', () => setView('edit'));
+$('navGarmin').addEventListener('click', () => setView('garmin'));
+
+function fmtDay(s) { const [y, m, d] = s.split('-'); return `${d}.${m}.${y}`; }
+function countdown(iso) {
+  if (!iso) return '';
+  const s = Math.max(0, Math.round((new Date(iso) - Date.now()) / 1000));
+  return s > 0 ? ` (noch ${Math.floor(s / 60)}:${pad(s % 60, 2)})` : '';
+}
+
+function updateEstimate() {
+  const f = $('gFrom').value, t = $('gTo').value;
+  if (!f || !t || f > t) { $('gEstimate').textContent = ''; return; }
+  const days = Math.round((Date.parse(t) - Date.parse(f)) / 86400000) + 1;
+  const chunks = Math.ceil(days / 28);
+  const minutes = Math.max(chunks, Math.ceil(chunks / 3) * 15);
+  const h = Math.floor(minutes / 60), m = minutes % 60;
+  $('gEstimate').textContent = `${days} Tage → ${chunks} Abschnitte · geschätzte Dauer etwa ${h ? h + ' Std. ' : ''}${m} Min. (je nach Menge der Aktivitäten).`;
+}
+$('gFrom').addEventListener('input', updateEstimate);
+$('gTo').addEventListener('input', updateEstimate);
+
+async function refreshGarmin() {
+  let data;
+  try { data = await api('GET', '/api/garmin/status'); } catch (e) { $('gConn').innerHTML = `<span class="err">${esc(e.message)}</span>`; return; }
+  gLast = data;
+  const c = data.connection;
+  if (!c) {
+    $('gConn').innerHTML = `<span class="err">Garmin-Status nicht abrufbar: ${esc(data.connectionError || '')}. Ist <code>GARMIN_PERSONAL_API_ENABLED=true</code> gesetzt?</span>`;
+  } else if (!c.connected) {
+    $('gConn').innerHTML = '<span class="err">Garmin ist in OpenAthlete nicht verbunden. Erst unter Settings → Connectors → Garmin Personal API den Schlüssel eintragen.</span>';
+  } else if (!c.preferences || !c.preferences.activities) {
+    $('gConn').innerHTML = '<span class="err">Garmin ist verbunden, aber der Aktivitäten-Import ist in OpenAthlete ausgeschaltet.</span>';
+  } else {
+    const st = { idle: 'bereit', queued: 'Import wartet', running: 'Import läuft', completed: 'letzter Import fertig', partial: 'letzter Import teilweise', failed: 'letzter Import fehlgeschlagen', key_required: 'neuer Schlüssel nötig' }[c.status] || c.status;
+    $('gConn').innerHTML = `<span class="ok">Garmin verbunden</span> · Status in OpenAthlete: ${esc(st)}` +
+      (c.lastSyncedAt ? ` · zuletzt importiert: ${new Date(c.lastSyncedAt).toLocaleString('de-DE')}` : '');
+  }
+  renderGarminJob(data.job);
+}
+
+function renderGarminJob(job) {
+  const running = job && job.status === 'running';
+  $('gStart').disabled = !!running;
+  $('gJobCard').classList.toggle('hidden', !job);
+  if (!job) return;
+  const total = job.chunks.length;
+  const done = job.chunks.filter((c) => c.status !== 'pending').length;
+  const pending = total - done;
+  const failed = job.chunks.filter((c) => c.status === 'failed').length;
+  $('gJobTitle').textContent = `${JOB_STATUS[job.status] || job.status}: ${fmtDay(job.startDate)} bis ${fmtDay(job.endDate)}`;
+  $('gBar').style.width = `${total ? Math.round((done / total) * 100) : 0}%`;
+  $('gPhase').innerHTML = `${done} von ${total} Abschnitten · ${esc(job.phase || '')}${esc(countdown(job.nextAt))}`;
+  const t = job.totals;
+  $('gTotals').innerHTML = `<strong>${t.imported}</strong> neu importiert · ${t.matched} schon vorhanden · ${t.skipped} übersprungen` +
+    (t.needsReview ? ` · ${t.needsReview} zur Prüfung` : '') + (t.failed ? ` · <span class="err">${t.failed} fehlgeschlagen</span>` : '');
+  $('gCancel').classList.toggle('hidden', !running);
+  $('gResume').classList.toggle('hidden', running || pending === 0);
+  $('gRetry').classList.toggle('hidden', running || failed === 0);
+  $('gClear').classList.toggle('hidden', running);
+  $('gChunks').innerHTML = job.chunks.map((c, i) => {
+    const [label, cls] = G_STATUS[c.status] || [c.status, ''];
+    const now = running && i === job.current ? ' ⏳' : '';
+    const r = c.result;
+    const res = c.error ? esc(c.error) : r ? `${r.imported} neu, ${r.matched} vorhanden${r.failed ? `, ${r.failed} Fehler` : ''}` : '';
+    return `<tr><td class="date">${fmtDay(c.startDate)} – ${fmtDay(c.endDate)}</td><td class="${cls}">${label}${now}</td><td>${res}</td></tr>`;
+  }).join('');
+  $('gLog').innerHTML = job.log.slice().reverse().map((l) =>
+    `<div><span class="muted">${new Date(l.zeit).toLocaleString('de-DE')}</span> ${esc(l.text)}</div>`).join('');
+}
+
+async function garminAction(path, body) {
+  $('gActionMsg').textContent = ''; $('gStartMsg').textContent = '';
+  try { renderGarminJob(await api('POST', path, body)); }
+  catch (e) { (path === '/api/garmin/import' ? $('gStartMsg') : $('gActionMsg')).textContent = e.message; }
+  refreshGarmin();
+}
+$('gStart').addEventListener('click', () => {
+  if (gLast && gLast.job && gLast.job.chunks.some((c) => c.status === 'pending') &&
+      !confirm('Es gibt noch einen unfertigen Import. Neu starten und den alten verwerfen?')) return;
+  garminAction('/api/garmin/import', { startDate: $('gFrom').value, endDate: $('gTo').value, order: $('gOrder').value });
+});
+$('gCancel').addEventListener('click', () => garminAction('/api/garmin/import/cancel'));
+$('gResume').addEventListener('click', () => garminAction('/api/garmin/import/resume'));
+$('gRetry').addEventListener('click', () => garminAction('/api/garmin/import/retry'));
+$('gClear').addEventListener('click', () => { if (confirm('Import-Verlauf löschen? Die importierten Aktivitäten bleiben erhalten.')) garminAction('/api/garmin/import/clear'); });
+$('gTo').value = isoDate(new Date().toISOString());
+
+// --------------------------------------------------------------------------
+// Start
+// --------------------------------------------------------------------------
+(async () => {
+  try {
+    const me = await api('GET', '/api/me');
+    if (me.loggedIn) { showApp(me.email); await init(); }
+    else showLogin();
+  } catch { showLogin(); }
+  try { if (localStorage.getItem('oaed_undo')) { $('runCard').classList.remove('hidden'); $('runTitle').textContent = 'Letzte Änderung'; $('runMsg').textContent = 'Die letzte Änderung kann noch rückgängig gemacht werden.'; $('undoBtn').classList.remove('hidden'); $('runBar').style.width = '100%'; } } catch {}
+})();
+</script>
+</body>
+</html>

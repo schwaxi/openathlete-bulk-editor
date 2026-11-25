@@ -1,0 +1,179 @@
+# OpenAthlete - Unraid (Docker Compose Manager) inkl. Masseneditor
+# Basis: offizielle docker-compose.yml von openathleteorg/openathlete
+
+x-api-image: &api-image ghcr.io/openathleteorg/openathlete-api:${OPENATHLETE_VERSION:-1}
+
+services:
+  # PostgreSQL mit pgvector
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: openathlete
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-openathlete_dev_password}
+      POSTGRES_DB: openathlete
+    volumes:
+      - /mnt/cache/appdata/openathlete/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openathlete"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - openathlete-network
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - /mnt/cache/appdata/openathlete/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - openathlete-network
+
+  # API inkl. Hintergrund-Jobs
+  api:
+    image: *api-image
+    ports:
+      - "${API_PORT:-127.0.0.1:3000}:3000"
+    environment:
+      ENV: ${ENV:-production}
+      NODE_ENV: production
+      PORT: 3000
+
+      DATABASE_URL: postgresql://openathlete:${POSTGRES_PASSWORD:-openathlete_dev_password}@postgres:5432/openathlete
+      REDIS_URL: redis://redis:6379/0
+
+      HASH_PEPPER: ${HASH_PEPPER:?Set HASH_PEPPER in .env}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env}
+
+      APP_URL: ${APP_URL:-http://localhost}
+      FRONTEND_URL: ${APP_URL:-http://localhost}
+      API_PUBLIC_URL: ${API_PUBLIC_URL:-}
+      SIGNUP_MODE: ${SIGNUP_MODE:-open}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_NAME: ${OIDC_NAME:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      TRUST_PROXY: ${TRUST_PROXY:-}
+
+      # Geräte-Integrationen (optional)
+      STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID:-}
+      STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET:-}
+      STRAVA_REDIRECT_URI: ${STRAVA_REDIRECT_URI:-}
+      STRAVA_WEBHOOK_TOKEN: ${STRAVA_WEBHOOK_TOKEN:-}
+      POLAR_CLIENT_ID: ${POLAR_CLIENT_ID:-}
+      POLAR_CLIENT_SECRET: ${POLAR_CLIENT_SECRET:-}
+      POLAR_REDIRECT_URI: ${POLAR_REDIRECT_URI:-}
+      POLAR_WEBHOOK_URL: ${POLAR_WEBHOOK_URL:-}
+      POLAR_WEBHOOK_SECRET_KEY: ${POLAR_WEBHOOK_SECRET_KEY:-}
+      GARMIN_PERSONAL_API_ENABLED: ${GARMIN_PERSONAL_API_ENABLED:-false}
+      GARMIN_CLIENT_ID: ${GARMIN_CLIENT_ID:-}
+      GARMIN_CLIENT_SECRET: ${GARMIN_CLIENT_SECRET:-}
+      GARMIN_REDIRECT_URI: ${GARMIN_REDIRECT_URI:-}
+      SUUNTO_CLIENT_ID: ${SUUNTO_CLIENT_ID:-}
+      SUUNTO_CLIENT_SECRET: ${SUUNTO_CLIENT_SECRET:-}
+      SUUNTO_REDIRECT_URI: ${SUUNTO_REDIRECT_URI:-}
+      SUUNTO_SUBSCRIPTION_KEY: ${SUUNTO_SUBSCRIPTION_KEY:-}
+      SUUNTO_WEBHOOK_SECRET: ${SUUNTO_WEBHOOK_SECRET:-}
+      COROS_REDIRECT_URI: ${COROS_REDIRECT_URI:-}
+
+      # Bilder (S3-kompatibel, optional)
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_REGION: ${S3_REGION:-}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-}
+
+      # E-Mail (optional)
+      BREVO_API_KEY: ${BREVO_API_KEY:-}
+      BREVO_FROM_EMAIL: ${BREVO_FROM_EMAIL:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-}
+      EMAIL_REPLY_TO: ${EMAIL_REPLY_TO:-}
+      EMAIL_SIGNATURE: ${EMAIL_SIGNATURE:-}
+      SIGNUP_NOTIFICATION_EMAIL: ${SIGNUP_NOTIFICATION_EMAIL:-}
+
+      # KI (optional)
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GOOGLE_GENERATIVE_AI_API_KEY: ${GOOGLE_GENERATIVE_AI_API_KEY:-}
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      AI_MODEL_DEFAULT: ${AI_MODEL_DEFAULT:-}
+      AI_HOSTED_ACCESS: ${AI_HOSTED_ACCESS:-}
+      AI_HOSTED_MONTHLY_BUDGET_USD: ${AI_HOSTED_MONTHLY_BUDGET_USD:-}
+      AI_ALLOW_CUSTOM_ENDPOINTS: ${AI_ALLOW_CUSTOM_ENDPOINTS:-}
+
+      # Push-Benachrichtigungen (optional)
+      FIREBASE_FUNCTIONS_URL: ${FIREBASE_FUNCTIONS_URL:-}
+
+      # Hintergrund-Jobs
+      ENABLE_ACTIVITY_IMPORT: ${ENABLE_ACTIVITY_IMPORT:-true}
+      ENABLE_ACTIVITY_PROCESSING: ${ENABLE_ACTIVITY_PROCESSING:-true}
+      ENABLE_TRAINING_LOAD_ESTIMATION: ${ENABLE_TRAINING_LOAD_ESTIMATION:-false}
+
+      POSTHOG_PROJECT_TOKEN: ${POSTHOG_PROJECT_TOKEN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - openathlete-network
+
+  # Web-App, leitet /api und /socket.io an die API weiter
+  web:
+    image: ghcr.io/openathleteorg/openathlete-web:${OPENATHLETE_VERSION:-1}
+    environment:
+      API_PUBLIC_URL: ${API_PUBLIC_URL:-}
+    ports:
+      - "${WEB_PORT:-8095}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - openathlete-network
+
+  # Masseneditor (eigene Erweiterung, spricht intern mit der API)
+  editor:
+    image: node:22-alpine
+    working_dir: /app
+    command: ["node", "server.js"]
+    environment:
+      OA_API_URL: http://api:3000
+      DATA_DIR: /data
+      PORT: 8080
+    volumes:
+      - /mnt/user/appdata/openathlete-editor/app:/app:ro
+      - /mnt/user/appdata/openathlete-editor/data:/data
+    ports:
+      - "${EDITOR_PORT:-8096}:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - openathlete-network
+
+networks:
+  openathlete-network:
+    driver: bridge
