@@ -27,6 +27,12 @@ bulk-edit your activities and import your full Garmin history.
 - Runs **server-side**: you can close the browser
 - Pause, resume, retry failed chunks. Survives container restarts (log in again and resume).
 - Chunks with more than 1000 activities are automatically split in half
+- Optionally applies your rules to the imported range when done
+
+**Fetch new activities**
+- One-click button in the header: imports everything since the last import and then applies your rules
+- Optional: fetch automatically whenever the editor is opened (at most every 30 minutes)
+- Lets you turn off OpenAthlete's hourly automatic Garmin sync and import on demand instead
 
 ## How it works
 

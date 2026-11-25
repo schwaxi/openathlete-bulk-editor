@@ -26,6 +26,7 @@
            background: var(--card); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; }
   header h1 { font-size: 16px; margin: 0; flex: 1; }
   header .who { color: var(--muted); }
+  @media (max-width: 700px) { header { flex-wrap: wrap; } header h1 { flex-basis: 100%; } }
   main { padding: 16px 20px 40px; max-width: 1500px; margin: 0 auto; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
   .card h2 { font-size: 14px; margin: 0 0 10px; }
@@ -85,6 +86,8 @@
     <button id="navEdit" class="active">Bearbeiten</button>
     <button id="navGarmin">Garmin-Import</button>
   </nav>
+  <button id="quickBtn" class="small hidden" title="Neue Garmin-Aktivitäten seit dem letzten Import holen und danach deine Regeln anwenden">⟳ Neue Aktivitäten holen</button>
+  <span id="quickMsg" class="muted hidden" style="font-size:12px"></span>
   <span class="who" id="who"></span>
   <button id="logoutBtn" class="small hidden">Abmelden</button>
 </header>
@@ -104,9 +107,23 @@
 
   <!-- Garmin-Verlauf-Import -->
   <section id="garminView" class="hidden">
+    <div id="gConn" class="summary card">Prüfe Garmin-Verbindung …</div>
+    <div class="card">
+      <h2>Neue Aktivitäten holen</h2>
+      <div class="hint" style="margin-bottom:10px">
+        Holt alle Garmin-Aktivitäten seit dem letzten Import und wendet danach deine Regeln
+        (Sportart und Ausrüstung nach Kürzel) auf sie an. Praktisch, wenn der stündliche
+        Auto-Import in OpenAthlete ausgeschaltet ist (Settings → Connectors → Garmin).
+      </div>
+      <div class="row">
+        <button class="primary" id="gQuick">⟳ Neue Aktivitäten holen</button>
+        <label class="inline"><input type="checkbox" id="gAuto"> Beim Öffnen des Editors automatisch holen</label>
+      </div>
+      <div id="gQuickInfo" class="hint" style="margin-top:6px"></div>
+      <div id="gQuickMsg" class="err" style="margin-top:6px"></div>
+    </div>
     <div class="card">
       <h2>Garmin-Verlauf importieren</h2>
-      <div id="gConn" class="summary">Prüfe Garmin-Verbindung …</div>
       <div class="hint" style="margin-bottom:10px">
         OpenAthlete importiert pro Auftrag höchstens 28 Tage und nimmt höchstens 3 Aufträge pro 15 Minuten an.
         Der Editor teilt deinen Zeitraum deshalb in Abschnitte und arbeitet sie nacheinander ab.
@@ -122,6 +139,7 @@
             <option value="asc">älteste zuerst</option>
           </select>
         </label>
+        <label class="inline"><input type="checkbox" id="gRules" checked> Danach Regeln anwenden</label>
         <button class="primary" id="gStart">Import starten</button>
       </div>
       <div id="gEstimate" class="hint" style="margin-top:6px"></div>
@@ -133,6 +151,7 @@
       <div class="progress"><div id="gBar"></div></div>
       <div id="gPhase" style="margin-top:8px"></div>
       <div id="gTotals" class="summary"></div>
+      <div id="gRulesRes" class="summary hidden"></div>
       <div class="row" style="margin-bottom:10px">
         <button id="gCancel" class="hidden">Abbrechen</button>
         <button id="gResume" class="primary hidden">Fortsetzen</button>
@@ -155,7 +174,7 @@
           <div class="tablewrap" style="max-height:360px;margin-top:6px;padding:6px 8px;font-size:12px" id="gLog"></div>
         </div>
       </div>
-      <div class="hint" style="margin-top:8px">Tipp: Danach unter „Bearbeiten“ → „Regeln“ deine Kürzel-Regeln auf die neuen Aktivitäten anwenden.</div>
+      <div class="hint" style="margin-top:8px" id="gRulesTip">Tipp: Danach unter „Bearbeiten“ → „Regeln“ deine Kürzel-Regeln auf die neuen Aktivitäten anwenden.</div>
     </div>
   </section>
 
@@ -295,6 +314,7 @@
   </section>
 </main>
 
+<script src="rules.js"></script>
 <script>
 'use strict';
 
@@ -359,13 +379,17 @@ function showLogin() {
   $('garminView').classList.add('hidden');
   $('nav').classList.add('hidden');
   $('logoutBtn').classList.add('hidden');
+  $('quickBtn').classList.add('hidden');
+  $('quickMsg').classList.add('hidden');
   $('who').textContent = '';
   stopGarminPoll();
+  stopQuickPoll();
 }
 function showApp(email) {
   $('login').classList.add('hidden');
   $('nav').classList.remove('hidden');
   $('logoutBtn').classList.remove('hidden');
+  $('quickBtn').classList.remove('hidden');
   $('who').textContent = email || '';
   setView(view);
 }
@@ -406,6 +430,7 @@ async function init() {
   fillSelects();
   renderRules();
   await loadActivities();
+  if (autoQuick()) startQuick(true); else checkQuickRunning();
 }
 
 async function loadActivities() {
@@ -453,18 +478,7 @@ function fillSelects() {
 // --------------------------------------------------------------------------
 // Filter
 // --------------------------------------------------------------------------
-function makeMatcher(text, word, regex) {
-  if (!text) return () => true;
-  let re;
-  try {
-    // Ohne Regex: * = beliebig viele Zeichen, ? = genau ein Zeichen
-    const src = regex ? text : text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\*/g, '.*').replace(/\\\?/g, '.');
-    re = word ? new RegExp(`(?<![\\p{L}\\p{N}])(?:${src})(?![\\p{L}\\p{N}])`, 'iu') : new RegExp(src, 'iu');
-  } catch {
-    return null; // ungültiger Regex
-  }
-  return (name) => re.test(name || '');
-}
+const makeMatcher = OARules.makeMatcher;
 
 function filtered() {
   const m = makeMatcher($('fName').value.trim(), $('fWord').checked, $('fRegex').checked);
@@ -547,25 +561,8 @@ function plannedBulk() {
 }
 
 function plannedRules() {
-  const plan = new Map();
   const pool = $('rOnlyFiltered').checked ? filtered() : activities;
-  const compiled = rules
-    .filter((r) => r.keyword && r.keyword.trim())
-    .map((r) => ({ ...r, match: makeMatcher(r.keyword.trim(), r.word !== false, false) }));
-  for (const a of pool) {
-    const ch = {};
-    for (const r of compiled) {
-      if (!r.match(a.name)) continue;
-      if (r.onlySport && r.onlySport !== a.sport) continue;
-      if (r.sport && r.sport !== a.sport && ch.sport === undefined) ch.sport = r.sport;
-      if (r.equipment && r.equipment !== '') {
-        const v = r.equipment === '__none' ? null : Number(r.equipment);
-        if ((v ?? null) !== (a.equipmentId ?? null) && ch.equipmentId === undefined) ch.equipmentId = v;
-      }
-    }
-    if (Object.keys(ch).length) plan.set(a.eventId, ch);
-  }
-  return plan;
+  return OARules.planRules(rules, pool);
 }
 
 function currentPlan() { return mode === 'rules' ? plannedRules() : plannedBulk(); }
@@ -839,6 +836,15 @@ async function refreshGarmin() {
       (c.lastSyncedAt ? ` · zuletzt importiert: ${new Date(c.lastSyncedAt).toLocaleString('de-DE')}` : '');
   }
   renderGarminJob(data.job);
+  renderQuickInfo(data.quick);
+}
+
+function renderQuickInfo(q) {
+  if (!q) return;
+  $('gQuick').disabled = q.running;
+  $('gQuickInfo').textContent = q.lastEnd
+    ? `Vollständig geholt bis ${fmtDay(q.lastEnd)}. Der nächste Lauf holt ab dem Vortag davon bis heute.`
+    : 'Noch kein Import über den Editor: Der erste Lauf holt die letzten 7 Tage.';
 }
 
 function renderGarminJob(job) {
@@ -846,11 +852,19 @@ function renderGarminJob(job) {
   $('gStart').disabled = !!running;
   $('gJobCard').classList.toggle('hidden', !job);
   if (!job) return;
+  const r = job.rulesResult;
+  $('gRulesRes').classList.toggle('hidden', !r);
+  if (r) {
+    $('gRulesRes').innerHTML = r.error ? `<span class="err">Regeln konnten nicht angewendet werden: ${esc(r.error)}</span>`
+      : r.noRules ? 'Regeln: keine gespeichert. Unter „Bearbeiten“ → „Regeln“ kannst du welche anlegen.'
+      : `Regeln: <strong>${r.changed}</strong> Aktivitäten angepasst` + (r.failed ? ` · <span class="err">${r.failed} fehlgeschlagen</span>` : '') + ` · ${r.checked} geprüft`;
+  }
+  $('gRulesTip').classList.toggle('hidden', !!job.applyRules);
   const total = job.chunks.length;
   const done = job.chunks.filter((c) => c.status !== 'pending').length;
   const pending = total - done;
   const failed = job.chunks.filter((c) => c.status === 'failed').length;
-  $('gJobTitle').textContent = `${JOB_STATUS[job.status] || job.status}: ${fmtDay(job.startDate)} bis ${fmtDay(job.endDate)}`;
+  $('gJobTitle').textContent = `${job.kind === 'quick' ? 'Neue Aktivitäten · ' : ''}${JOB_STATUS[job.status] || job.status}: ${fmtDay(job.startDate)} bis ${fmtDay(job.endDate)}`;
   $('gBar').style.width = `${total ? Math.round((done / total) * 100) : 0}%`;
   $('gPhase').innerHTML = `${done} von ${total} Abschnitten · ${esc(job.phase || '')}${esc(countdown(job.nextAt))}`;
   const t = job.totals;
@@ -880,13 +894,74 @@ async function garminAction(path, body) {
 $('gStart').addEventListener('click', () => {
   if (gLast && gLast.job && gLast.job.chunks.some((c) => c.status === 'pending') &&
       !confirm('Es gibt noch einen unfertigen Import. Neu starten und den alten verwerfen?')) return;
-  garminAction('/api/garmin/import', { startDate: $('gFrom').value, endDate: $('gTo').value, order: $('gOrder').value });
+  garminAction('/api/garmin/import', { startDate: $('gFrom').value, endDate: $('gTo').value, order: $('gOrder').value, applyRules: $('gRules').checked });
 });
 $('gCancel').addEventListener('click', () => garminAction('/api/garmin/import/cancel'));
 $('gResume').addEventListener('click', () => garminAction('/api/garmin/import/resume'));
 $('gRetry').addEventListener('click', () => garminAction('/api/garmin/import/retry'));
 $('gClear').addEventListener('click', () => { if (confirm('Import-Verlauf löschen? Die importierten Aktivitäten bleiben erhalten.')) garminAction('/api/garmin/import/clear'); });
 $('gTo').value = isoDate(new Date().toISOString());
+
+// --------------------------------------------------------------------------
+// Neue Aktivitäten holen (Kopfzeile + Garmin-Ansicht)
+// --------------------------------------------------------------------------
+let qTimer = null;
+let qWasRunning = false;
+function autoQuick() { try { return localStorage.getItem('oaed_autoquick') === '1'; } catch { return false; } }
+$('gAuto').checked = autoQuick();
+$('gAuto').addEventListener('change', () => {
+  try { localStorage.setItem('oaed_autoquick', $('gAuto').checked ? '1' : '0'); } catch {}
+});
+function stopQuickPoll() { if (qTimer) clearInterval(qTimer); qTimer = null; }
+function quickMsg(html) { $('quickMsg').innerHTML = html; $('quickMsg').classList.toggle('hidden', !html); }
+
+function showQuickJob(job) {
+  const running = job && job.status === 'running';
+  $('quickBtn').disabled = !!running;
+  if (!job || job.kind !== 'quick') { if (!running) stopQuickPoll(); return; }
+  if (running) {
+    qWasRunning = true;
+    quickMsg(`Holt Garmin-Aktivitäten … ${esc(job.phase || '')}${esc(countdown(job.nextAt))}`);
+    return;
+  }
+  stopQuickPoll();
+  if (!qWasRunning) return;
+  qWasRunning = false;
+  const r = job.rulesResult;
+  const rulesTxt = !r ? '' : r.error ? ' · <span class="err">Regeln fehlgeschlagen</span>' : r.noRules ? '' : ` · ${r.changed} per Regel angepasst`;
+  if (job.status === 'done') {
+    quickMsg(`<span class="ok">✓ ${job.totals.imported} neu</span>${rulesTxt}`);
+    if (view === 'edit' && !busy) loadActivities();
+  } else {
+    quickMsg(`<span class="err">${esc(job.phase || 'angehalten')}</span>`);
+  }
+}
+async function pollQuick() {
+  try { showQuickJob((await api('GET', '/api/garmin/status')).job); } catch { stopQuickPoll(); }
+}
+function watchQuick() { stopQuickPoll(); qTimer = setInterval(pollQuick, 3000); }
+async function checkQuickRunning() {
+  try {
+    const st = await api('GET', '/api/garmin/status');
+    if (st.job && st.job.status === 'running') { showQuickJob(st.job); watchQuick(); }
+  } catch {}
+}
+async function startQuick(auto) {
+  $('gQuickMsg').textContent = '';
+  try {
+    const r = await api('POST', '/api/garmin/quick', auto ? { auto: true } : {});
+    if (r.started) { qWasRunning = true; showQuickJob(r.job); watchQuick(); }
+    else if (r.job && r.job.status === 'running') { showQuickJob(r.job); watchQuick(); }
+    else if (auto && r.skipped === 'vor kurzem geholt') quickMsg('vor kurzem schon geholt');
+    else if (auto && r.skipped) quickMsg(esc(r.skipped));
+  } catch (e) {
+    quickMsg(`<span class="err">${esc(e.message)}</span>`);
+    if (!auto) $('gQuickMsg').textContent = e.message;
+  }
+  if (view === 'garmin') refreshGarmin();
+}
+$('quickBtn').addEventListener('click', () => startQuick(false));
+$('gQuick').addEventListener('click', () => startQuick(false));
 
 // --------------------------------------------------------------------------
 // Start

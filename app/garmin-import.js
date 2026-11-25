@@ -47,8 +47,19 @@ function makeChunks(startDate, endDate, order) {
   return chunks;
 }
 
-function createImporter({ authed, dataDir, apiError }) {
+const QUICK_DAYS = 7; // ohne früheren Import: so viele Tage zurück
+const AUTO_MIN_GAP_MS = 30 * 60000; // automatisches Holen höchstens alle 30 Minuten
+
+function createImporter({ authed, dataDir, apiError, applyRules }) {
   const stateFile = path.join(dataDir, 'garmin-import.json');
+  const quickFile = path.join(dataDir, 'garmin-neu.json');
+  let quick = {}; // { lastEnd: 'YYYY-MM-DD', lastRunAt: ISO }
+  try { quick = JSON.parse(fs.readFileSync(quickFile, 'utf8')) || {}; } catch { quick = {}; }
+  function saveQuick() {
+    try { fs.writeFileSync(quickFile, JSON.stringify(quick, null, 2)); } catch (e) {
+      console.error('Stand für „Neue Aktivitäten holen“ konnte nicht gespeichert werden:', e.message);
+    }
+  }
   let job = null; // gespeicherter Zustand (ohne Zugangsdaten)
   let tokens = null; // { accessToken, refreshToken } nur im Speicher
   let runner = null; // laufende Promise
@@ -215,10 +226,36 @@ function createImporter({ authed, dataDir, apiError }) {
         }
         save();
       }
+      const failedChunks = job.chunks.filter((c) => c.status === 'failed').length;
+      // Bis wann sind die Aktivitäten vollständig geholt? (für „Neue Aktivitäten holen“)
+      if (!failedChunks && (!quick.lastEnd || job.endDate > quick.lastEnd)) {
+        quick.lastEnd = job.endDate;
+        saveQuick();
+      }
+      if (job.applyRules && applyRules) {
+        job.current = null;
+        setPhase('Wende deine Regeln auf die Aktivitäten im Zeitraum an …');
+        try {
+          const r = await applyRules(tokens, job.startDate, job.endDate);
+          job.rulesResult = { checked: r.checked, changed: r.changed.length, failed: r.failed.length, noRules: r.noRules };
+          if (r.noRules) addLog('Keine Regeln gespeichert, nichts angepasst.');
+          else {
+            for (const c of r.changed.slice(0, 100)) addLog(`Regel: „${c.name}“ (${c.date}) → ${c.text}`);
+            if (r.changed.length > 100) addLog(`… und ${r.changed.length - 100} weitere per Regel geändert.`);
+            for (const f of r.failed.slice(0, 50)) addLog(`✗ Regel bei „${f.name}“ (${f.date}): ${f.error}`);
+            addLog(`Regeln angewendet: ${r.changed.length} geändert${r.failed.length ? `, ${r.failed.length} fehlgeschlagen` : ''}, ${r.checked} geprüft.`);
+          }
+        } catch (e) {
+          if (e.message === '__cancel') throw e;
+          job.rulesResult = { error: e.message };
+          addLog(`✗ Regeln konnten nicht angewendet werden: ${e.message}`);
+        }
+      }
       job.status = 'done';
       job.current = null;
+      job.finishedAt = new Date().toISOString();
       setPhase('Fertig.');
-      addLog('Import abgeschlossen.');
+      addLog(job.kind === 'quick' ? 'Neue Aktivitäten geholt.' : 'Import abgeschlossen.');
     } catch (e) {
       if (e.message === '__cancel') {
         job.status = 'cancelled';
@@ -232,37 +269,72 @@ function createImporter({ authed, dataDir, apiError }) {
     } finally {
       job.cancel = false;
       job.nextAt = null;
+      if (job.kind === 'quick') { quick.lastRunAt = new Date().toISOString(); saveQuick(); }
       save();
       runner = null;
     }
+  }
+
+  function newJob(session, { startDate, endDate, order, applyRules: withRules, kind }) {
+    tokens = { accessToken: session.accessToken, refreshToken: session.refreshToken };
+    job = {
+      createdAt: new Date().toISOString(),
+      konto: session.email,
+      kind,
+      startDate,
+      endDate,
+      order,
+      applyRules: !!withRules,
+      chunks: makeChunks(startDate, endDate, order),
+      totals: { imported: 0, matched: 0, skipped: 0, needsReview: 0, failed: 0 },
+      rulesResult: null,
+      log: [],
+      status: 'running',
+      phase: 'Startet …',
+      nextAt: null,
+      current: null,
+    };
   }
 
   return {
     state() {
       return job ? { ...job, cancel: undefined } : null;
     },
-    start(session, { startDate, endDate, order }) {
+    quickInfo() {
+      return { lastEnd: quick.lastEnd || null, lastRunAt: quick.lastRunAt || null, running: !!runner };
+    },
+    // Neue Aktivitäten seit dem letzten Import holen und danach die Regeln anwenden
+    quick(session, { auto } = {}) {
+      if (runner) {
+        if (auto) return { skipped: 'läuft schon', job: this.state() };
+        throw new Error('Es läuft bereits ein Import.');
+      }
+      if (job && job.kind !== 'quick' && job.chunks.some((c) => c.status === 'pending')) {
+        if (auto) return { skipped: 'Verlauf-Import offen', job: this.state() };
+        throw new Error('Es gibt einen unfertigen Verlauf-Import. Bitte erst fortsetzen oder unter „Garmin-Import“ löschen.');
+      }
+      if (auto && quick.lastRunAt && Date.now() - Date.parse(quick.lastRunAt) < AUTO_MIN_GAP_MS) {
+        return { skipped: 'vor kurzem geholt', job: this.state() };
+      }
+      const endDate = todayUtc();
+      // einen Tag Überlappung, damit Aktivitäten rund um Mitternacht nicht fehlen
+      let startDate = quick.lastEnd
+        ? isoDay(parseDay(quick.lastEnd) - DAY)
+        : isoDay(parseDay(endDate) - (QUICK_DAYS - 1) * DAY);
+      if (startDate > endDate) startDate = endDate;
+      newJob(session, { startDate, endDate, order: 'asc', applyRules: true, kind: 'quick' });
+      addLog(`Neue Aktivitäten holen: ${startDate} bis ${endDate}${job.chunks.length > 1 ? ` (${job.chunks.length} Abschnitte)` : ''}.`);
+      runner = run();
+      return { started: true, job: this.state() };
+    },
+    start(session, { startDate, endDate, order, applyRules: withRules }) {
       if (runner) throw new Error('Es läuft bereits ein Import.');
       if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate || '') || !/^\d{4}-\d{2}-\d{2}$/.test(endDate || '')) {
         throw new Error('Bitte Von- und Bis-Datum angeben.');
       }
       if (endDate > todayUtc()) endDate = todayUtc();
       if (startDate > endDate) throw new Error('Das Von-Datum liegt nach dem Bis-Datum.');
-      tokens = { accessToken: session.accessToken, refreshToken: session.refreshToken };
-      job = {
-        createdAt: new Date().toISOString(),
-        konto: session.email,
-        startDate,
-        endDate,
-        order: order === 'asc' ? 'asc' : 'desc',
-        chunks: makeChunks(startDate, endDate, order === 'asc' ? 'asc' : 'desc'),
-        totals: { imported: 0, matched: 0, skipped: 0, needsReview: 0, failed: 0 },
-        log: [],
-        status: 'running',
-        phase: 'Startet …',
-        nextAt: null,
-        current: null,
-      };
+      newJob(session, { startDate, endDate, order: order === 'asc' ? 'asc' : 'desc', applyRules: withRules, kind: 'history' });
       addLog(`Import ${startDate} bis ${endDate} in ${job.chunks.length} Abschnitten gestartet.`);
       runner = run();
       return this.state();

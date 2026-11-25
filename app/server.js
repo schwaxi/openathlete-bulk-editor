@@ -180,8 +180,62 @@ function serveStatic(req, res, urlPath) {
   });
 }
 
+function readRules() {
+  try {
+    const r = JSON.parse(fs.readFileSync(RULES_FILE, 'utf8'));
+    return Array.isArray(r) ? r : [];
+  } catch {
+    return [];
+  }
+}
+
+// Gespeicherte Regeln auf alle Aktivitäten im Zeitraum anwenden (nach einem Garmin-Import)
+const { planRules } = require('./public/rules.js');
+async function applyRulesInRange(tokens, startDate, endDate) {
+  const rules = readRules().filter((r) => r && typeof r.keyword === 'string' && r.keyword.trim());
+  if (!rules.length) return { noRules: true, checked: 0, changed: [], failed: [] };
+  // je einen Tag Puffer wegen Zeitzonen; die Regeln ändern nur, was abweicht
+  const from = new Date(Date.parse(`${startDate}T00:00:00Z`) - 86400000).toISOString();
+  const to = new Date(Date.parse(`${endDate}T23:59:59Z`) + 86400000).toISOString();
+  const r = await authed(tokens, 'GET', `/event?startDate=${encodeURIComponent(from)}&endDate=${encodeURIComponent(to)}`);
+  if (!r.ok) throw new Error(`Aktivitäten nicht abrufbar: ${apiError(r)}`);
+  const list = (Array.isArray(r.data) ? r.data : []).filter((e) => e.type === 'ACTIVITY').map(slimActivity);
+  const plan = planRules(rules, list);
+  const changed = [];
+  const failed = [];
+  let equipNames = null;
+  for (const [eventId, ch] of plan) {
+    const a = list.find((x) => x.eventId === eventId);
+    const date = (a.startDate || '').slice(0, 10);
+    const res = await authed(tokens, 'PATCH', `/event/${eventId}`, { type: 'ACTIVITY', ...ch });
+    logChange({
+      konto: 'Regeln nach Garmin-Import',
+      eventId,
+      vorher: { name: a.name, sport: a.sport, equipmentId: a.equipmentId },
+      nachher: { type: 'ACTIVITY', ...ch },
+      ok: res.ok,
+      fehler: res.ok ? undefined : apiError(res),
+    });
+    if (!res.ok) {
+      failed.push({ eventId, name: a.name, date, error: apiError(res) });
+      continue;
+    }
+    const parts = [];
+    if (ch.sport) parts.push(`Sportart ${ch.sport}`);
+    if ('equipmentId' in ch) {
+      if (!equipNames) {
+        const eq = await authed(tokens, 'GET', '/equipment');
+        equipNames = new Map((eq.ok && Array.isArray(eq.data) ? eq.data : []).map((e) => [e.equipmentId, e.name]));
+      }
+      parts.push(ch.equipmentId == null ? 'keine Ausrüstung' : `Ausrüstung ${equipNames.get(ch.equipmentId) || `#${ch.equipmentId}`}`);
+    }
+    changed.push({ eventId, name: a.name, date, text: parts.join(', ') });
+  }
+  return { noRules: false, checked: list.length, changed, failed };
+}
+
 const { createImporter } = require('./garmin-import');
-const importer = createImporter({ authed, dataDir: DATA_DIR, apiError });
+const importer = createImporter({ authed, dataDir: DATA_DIR, apiError, applyRules: applyRulesInRange });
 
 // ---------------------------------------------------------------------------
 // Routen
@@ -315,7 +369,16 @@ async function handle(req, res) {
       connection: r.ok ? r.data : null,
       connectionError: r.ok ? null : apiError(r),
       job: importer.state(),
+      quick: importer.quickInfo(),
     });
+  }
+  if (p === '/api/garmin/quick' && req.method === 'POST') {
+    try {
+      const { auto } = await readBody(req);
+      return send(res, 200, importer.quick(session, { auto: auto === true }));
+    } catch (e) {
+      return send(res, 409, { error: e.message });
+    }
   }
   const gm = p.match(/^\/api\/garmin\/import(?:\/(cancel|resume|retry|clear))?$/);
   if (gm && req.method === 'POST') {
@@ -333,11 +396,7 @@ async function handle(req, res) {
 
   // --- Regeln (gespeichert in /data/regeln.json) ---------------------------
   if (p === '/api/rules' && req.method === 'GET') {
-    try {
-      return send(res, 200, JSON.parse(fs.readFileSync(RULES_FILE, 'utf8')));
-    } catch {
-      return send(res, 200, []);
-    }
+    return send(res, 200, readRules());
   }
   if (p === '/api/rules' && req.method === 'PUT') {
     const rules = await readBody(req);

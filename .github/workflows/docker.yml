@@ -26,6 +26,7 @@ jobs:
         run: |
           node --check app/server.js
           node --check app/garmin-import.js
+          node --check app/public/rules.js
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3

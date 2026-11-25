@@ -22,6 +22,8 @@ selbst neu. In die Datenbank schreibt der Editor nicht direkt.
 - **Protokoll** aller Änderungen in `data/aenderungen.log`
 - **Garmin-Verlauf importieren** (Reiter „Garmin-Import“): beliebig langer Zeitraum,
   automatisch in 28-Tage-Abschnitte geteilt, läuft im Container weiter (siehe unten)
+- **Neue Aktivitäten holen** mit einem Klick (oben rechts): holt alles seit dem letzten
+  Import und wendet danach automatisch deine Regeln an
 
 ## 1. Dateien auf den Server kopieren
 
@@ -33,7 +35,8 @@ Auf dem Unraid-Server soll diese Struktur entstehen:
 │   ├── server.js
 │   ├── garmin-import.js
 │   └── public/
-│       └── index.html
+│       ├── index.html
+│       └── rules.js
 └── data/            (leer, wird vom Editor befüllt)
 ```
 
@@ -103,6 +106,23 @@ OpenAthlete-Zugangsdaten anmelden.
 
 **Regeln** (Reiter rechts oben): Kürzel eintragen, Sportart und Ausrüstung wählen,
 *Regeln speichern*. Nach jedem neuen Import einfach *Regeln anwenden* klicken.
+Beim Holen über den Editor (siehe unten) passiert das automatisch.
+
+## Neue Aktivitäten holen
+
+Der Button **⟳ Neue Aktivitäten holen** oben rechts holt alle Garmin-Aktivitäten
+seit dem letzten Import bis heute (beim allerersten Mal die letzten 7 Tage).
+Danach wendet der Editor deine **Regeln** auf diesen Zeitraum an, also Sportart und
+Ausrüstung nach Kürzel. Oben rechts steht anschließend z. B. „✓ 3 neu · 2 per Regel angepasst“.
+
+- Unter *Garmin-Import* kannst du **„Beim Öffnen des Editors automatisch holen“**
+  einschalten. Dann startet das Holen bei jedem Öffnen bzw. Anmelden von selbst
+  (höchstens alle 30 Minuten). Die Einstellung gilt pro Browser.
+- Damit nur noch der Editor importiert, in OpenAthlete unter *Settings → Connectors →
+  Garmin* das Häkchen **„Jede Stunde automatisch die letzten sieben Tage prüfen“**
+  ausschalten. **„Import meiner Garmin-Aktivitäten erlauben“** muss an bleiben.
+- Die Regeln gelten für alle Aktivitäten im geholten Zeitraum. Hast du dort eine
+  Fahrt mit Kürzel von Hand anders eingestellt, setzt die Regel sie wieder zurück.
 
 ## Garmin-Verlauf importieren
 
@@ -130,7 +150,10 @@ nacheinander importieren. Dabei hält er die Grenzen von OpenAthlete ein: höchs
 - Schon vorhandene Aktivitäten überspringt OpenAthlete selbst. Ein doppelter
   Import schadet also nicht.
 - Die Namen kommen aus Garmin Connect. Deine Kürzel wie „M9“ sind also dabei.
-  Danach unter **Bearbeiten → Regeln** einfach *Regeln anwenden*.
+  Mit **„Danach Regeln anwenden“** (Standard) setzt der Editor am Ende Sportart und
+  Ausrüstung nach deinen Regeln.
+- Spätere Änderungen in Garmin Connect (z. B. ein neuer Name) übernimmt OpenAthlete
+  bei einem erneuten Import **nicht**. Bereits importierte Aktivitäten bleiben, wie sie sind.
 
 ## Gut zu wissen
 
