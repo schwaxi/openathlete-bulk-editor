@@ -125,17 +125,27 @@
     <div class="card">
       <h2>Garmin-Export importieren (ZIP aus „Daten exportieren“)</h2>
       <div class="hint" style="margin-bottom:10px">
-        Lege die ZIP von Garmin unverändert in den Ordner <code>data/import</code> des Editors
-        (auf Unraid: <code>appdata/openathlete-editor/data/import</code>). Der Editor liest daraus alle
+        Wähle die ZIP von Garmin unverändert unten aus und lade sie hoch (oder lege sie selbst in den Ordner
+        <code>data/import</code> des Editors). Der Editor liest daraus alle
         Aktivitätsdateien, übernimmt die Namen aus Garmin und lädt sie einzeln hoch.
         <strong>Multisport</strong> (Triathlon, Duathlon …) wird in einzelne Aktivitäten geteilt,
         Wechselzonen landen als „Sonstiges“. Schon vorhandene Aktivitäten lehnt OpenAthlete selbst ab.
       </div>
+      <div class="row" style="margin-bottom:8px">
+        <label>ZIP von deinem Rechner
+          <input type="file" id="xFile" accept=".zip,.fit,.gpx,.tcx">
+        </label>
+        <button id="xUpload" disabled>Hochladen</button>
+        <button id="xUpCancel" class="hidden">Upload abbrechen</button>
+        <span id="xUpInfo" class="muted"></span>
+      </div>
+      <div class="progress hidden" id="xUpProg" style="margin-bottom:10px"><div id="xUpBar"></div></div>
       <div class="row">
         <label>Datei im Import-Ordner
           <select id="xSource"></select>
         </label>
         <button id="xRefresh" class="small" title="Liste neu laden">↻</button>
+        <button id="xDelete" class="small" title="Gewählte Datei aus dem Import-Ordner löschen">Löschen</button>
         <button id="xScan">Prüfen</button>
         <label class="inline"><input type="checkbox" id="xRules" checked> Danach Regeln anwenden</label>
         <button class="primary" id="xStart" disabled>Import starten</button>
@@ -914,6 +924,7 @@ async function refreshExport(forceList) {
 function renderExport(job) {
   const busyX = job && (job.status === 'running' || job.status === 'scanning');
   $('xScan').disabled = !!busyX || !xLast || !xLast.sources.length;
+  $('xDelete').disabled = !!busyX || !xLast || !xLast.sources.some((s) => !s.dir && s.name === $('xSource').value);
   $('xStart').disabled = !job || job.status !== 'ready' || !job.total;
   $('xJob').classList.toggle('hidden', !job);
   if (!job) return;
@@ -952,6 +963,69 @@ async function exportAction(action, body) {
   refreshExport();
 }
 $('xRefresh').addEventListener('click', () => refreshExport(true));
+$('xSource').addEventListener('change', () => renderExport(xLast && xLast.job));
+let xXhr = null;
+$('xFile').addEventListener('change', () => {
+  const f = $('xFile').files[0];
+  $('xUpload').disabled = !f;
+  $('xUpInfo').textContent = f ? fmtSize(f.size) : '';
+});
+$('xUpload').addEventListener('click', () => {
+  const f = $('xFile').files[0];
+  if (!f) return;
+  if (xLast && xLast.sources.some((s) => s.name === f.name) && !confirm(`„${f.name}“ liegt schon im Import-Ordner. Ersetzen?`)) return;
+  $('xMsg').textContent = '';
+  const xhr = new XMLHttpRequest();
+  xXhr = xhr;
+  const t0 = Date.now();
+  const done = (msg) => {
+    xXhr = null;
+    $('xUpload').disabled = false;
+    $('xUpCancel').classList.add('hidden');
+    $('xUpProg').classList.add('hidden');
+    $('xUpInfo').textContent = msg || '';
+  };
+  xhr.open('PUT', `/api/export/upload?name=${encodeURIComponent(f.name)}`);
+  xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+  xhr.upload.onprogress = (e) => {
+    if (!e.lengthComputable) return;
+    const pct = Math.round((e.loaded / e.total) * 100);
+    const secs = (Date.now() - t0) / 1000;
+    const rest = e.loaded > 0 ? Math.round((secs / e.loaded) * (e.total - e.loaded)) : 0;
+    $('xUpBar').style.width = `${pct}%`;
+    $('xUpInfo').textContent = `${pct} % · ${fmtSize(e.loaded)} von ${fmtSize(e.total)}` + (pct < 100 ? ` · noch etwa ${rest > 90 ? Math.round(rest / 60) + ' min' : rest + ' s'}` : ' · wird gespeichert …');
+  };
+  xhr.onload = () => {
+    let data = {};
+    try { data = JSON.parse(xhr.responseText); } catch { /* egal */ }
+    if (xhr.status === 200) {
+      done(`„${data.name}“ hochgeladen. Jetzt „Prüfen“ klicken.`);
+      $('xFile').value = '';
+      refreshExport(true).then(() => { $('xSource').value = data.name; renderExport(xLast && xLast.job); });
+    } else {
+      done('');
+      $('xMsg').textContent = data.error || `Upload fehlgeschlagen (${xhr.status})`;
+    }
+  };
+  xhr.onerror = () => { done(''); $('xMsg').textContent = 'Upload fehlgeschlagen (Verbindung unterbrochen)'; };
+  xhr.onabort = () => done('Upload abgebrochen.');
+  $('xUpload').disabled = true;
+  $('xUpCancel').classList.remove('hidden');
+  $('xUpProg').classList.remove('hidden');
+  $('xUpBar').style.width = '0%';
+  xhr.send(f);
+});
+$('xUpCancel').addEventListener('click', () => { if (xXhr) xXhr.abort(); });
+window.addEventListener('beforeunload', (e) => { if (xXhr) { e.preventDefault(); e.returnValue = ''; } });
+$('xDelete').addEventListener('click', async () => {
+  const name = $('xSource').value;
+  if (!name || !confirm(`„${name}“ aus dem Import-Ordner löschen?
+
+Der Import-Stand bleibt erhalten, aber „Fortsetzen“ geht danach nicht mehr.`)) return;
+  $('xMsg').textContent = '';
+  try { await api('DELETE', `/api/export/file?name=${encodeURIComponent(name)}`); } catch (e) { $('xMsg').textContent = e.message; }
+  refreshExport(true);
+});
 $('xScan').addEventListener('click', () => {
   if (xLast && xLast.job && xLast.job.pending && xLast.job.status !== 'ready' && xLast.job.status !== 'failed' &&
       !confirm('Es gibt einen unfertigen Export-Import. Neu prüfen und den alten Stand verwerfen?')) return;

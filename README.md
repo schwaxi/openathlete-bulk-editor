@@ -32,6 +32,7 @@ bulk-edit your activities and import your full Garmin history.
 **Garmin data export import (incl. multisport)**
 - Imports the full ZIP from Garmin Connect's "Export your data", without unpacking it
   (ZIP64 supported, nested ZIPs handled)
+- Upload the ZIP straight from the browser (streamed, with progress), or drop it into `data/import`
 - Activity names are taken from Garmin's activity list in the export (matched by start time)
 - **Multisport activities** (triathlon, duathlon …), which OpenAthlete rejects, are split into
   one activity per leg, including transitions (imported as *Other*)

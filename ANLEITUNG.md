@@ -137,10 +137,12 @@ und Duathlons nämlich ab.
 
 1. In Garmin Connect den Datenexport anfordern (Konto → Datenverwaltung → Daten
    exportieren). Garmin schickt nach einiger Zeit einen Download-Link per E-Mail.
-2. Die ZIP **unverändert** in den Ordner `data/import` des Editors legen, auf Unraid
-   `\\TOWER\appdata\openathlete-editor\data\import\`. Der Ordner wird beim ersten
-   Start angelegt. Entpacken ist nicht nötig.
-3. Im Editor unter **Garmin-Import → Garmin-Export importieren** die Datei wählen und
+2. Im Editor unter **Garmin-Import → Garmin-Export importieren** bei „ZIP von deinem
+   Rechner“ die ZIP **unverändert** auswählen und **Hochladen** klicken. Entpacken ist
+   nicht nötig. Lass das Fenster offen, bis der Fortschrittsbalken fertig ist.
+   Alternativ die ZIP selbst in den Ordner `data/import` legen. Auf Unraid gehört
+   dieser Ordner aber root, über die Netzwerkfreigabe darfst du dort meist nichts ablegen.
+3. Die hochgeladene Datei ist dann unter „Datei im Import-Ordner“ ausgewählt.
    **Prüfen** klicken. Der Editor zeigt, wie viele Aktivitäten im Export sind, aus
    welchem Zeitraum, wie viele davon Multisport sind und wie viele einen Namen aus
    Garmin haben.
@@ -162,7 +164,7 @@ und Duathlons nämlich ab.
   funktionieren wie beim Garmin-Import. Fehlgeschlagene stehen mit Grund in einer Liste.
 - Für das Entpacken braucht der Editor vorübergehend so viel freien Platz im
   `data`-Ordner, wie die größte innere ZIP groß ist. Nach dem Import kannst du die
-  Export-ZIP aus `data/import` löschen.
+  Export-ZIP mit **Löschen** neben der Dateiauswahl entfernen.
 
 ## Garmin-Verlauf importieren
 

@@ -258,6 +258,24 @@ async function uploadActivityFile(tokens, kind, buffer, filename, name) {
 const { createExportImporter } = require('./export-import');
 const exportImporter = createExportImporter({ dataDir: DATA_DIR, upload: uploadActivityFile, applyRules: applyRulesInRange });
 
+function exportBusy() {
+  const j = exportImporter.state();
+  return !!j && (j.status === 'running' || j.status === 'scanning');
+}
+function safeImportName(raw) {
+  const base = path.basename(String(raw || '')).replace(/[^\w.\- ()äöüÄÖÜß]/g, '_').trim();
+  if (!base || base.startsWith('.') || base.length > 150) return null;
+  return /\.(zip|fit|gpx|tcx)$/i.test(base) ? base : null;
+}
+function freeBytes(dir) {
+  try {
+    const s = fs.statfsSync(dir);
+    return s.bavail * s.bsize;
+  } catch {
+    return null;
+  }
+}
+
 const { createImporter } = require('./garmin-import');
 const importer = createImporter({ authed, dataDir: DATA_DIR, apiError, applyRules: applyRulesInRange });
 
@@ -422,6 +440,45 @@ async function handle(req, res) {
   if (p === '/api/export/status' && req.method === 'GET') {
     return send(res, 200, { sources: exportImporter.sources(), job: exportImporter.state() });
   }
+  // Datei aus dem Browser in den Import-Ordner hochladen (roh, ohne Formular, damit
+  // auch eine 600-MB-ZIP gestreamt statt in den Speicher gelesen wird)
+  if (p === '/api/export/upload' && req.method === 'PUT') {
+    const name = safeImportName(url.searchParams.get('name'));
+    if (!name) return send(res, 400, { error: 'Nur .zip, .fit, .gpx oder .tcx erlaubt' });
+    if (exportBusy()) return send(res, 409, { error: 'Während eines Imports kann nichts hochgeladen werden.' });
+    const size = Number(req.headers['content-length']);
+    const free = freeBytes(exportImporter.importDir);
+    if (size && free != null && size + 200e6 > free) {
+      return send(res, 507, { error: `Zu wenig Speicherplatz frei (${Math.round(free / 1e6)} MB frei, nötig etwa ${Math.round((size + 200e6) / 1e6)} MB).` });
+    }
+    const target = path.join(exportImporter.importDir, name);
+    const part = `${target}.part`;
+    try {
+      await new Promise((resolve, reject) => {
+        const out = fs.createWriteStream(part);
+        let got = 0;
+        req.on('data', (c) => { got += c.length; });
+        req.on('aborted', () => reject(new Error('Upload abgebrochen')));
+        out.on('error', reject);
+        out.on('finish', () => (size && got !== size ? reject(new Error('Upload unvollständig')) : resolve()));
+        req.pipe(out);
+      });
+      fs.renameSync(part, target);
+    } catch (e) {
+      try { fs.rmSync(part, { force: true }); } catch { /* egal */ }
+      if (!res.headersSent && !req.destroyed) return send(res, 400, { error: e.message });
+      return undefined;
+    }
+    return send(res, 200, { ok: true, name, sources: exportImporter.sources() });
+  }
+  if (p === '/api/export/file' && req.method === 'DELETE') {
+    const name = url.searchParams.get('name') || '';
+    const entry = exportImporter.sources().find((s) => s.name === name && !s.dir);
+    if (!entry) return send(res, 404, { error: 'Datei nicht gefunden' });
+    if (exportBusy()) return send(res, 409, { error: 'Während eines Imports kann nichts gelöscht werden.' });
+    fs.rmSync(path.join(exportImporter.importDir, entry.name), { force: true });
+    return send(res, 200, { ok: true, sources: exportImporter.sources() });
+  }
   const em = p.match(/^\/api\/export\/(scan|start|cancel|resume|retry|clear)$/);
   if (em && req.method === 'POST') {
     try {
@@ -452,7 +509,7 @@ async function handle(req, res) {
   return send(res, 404, { error: 'Unbekannter Pfad' });
 }
 
-http
+const server = http
   .createServer((req, res) => {
     handle(req, res).catch((e) => {
       console.error(e);
@@ -462,3 +519,5 @@ http
   .listen(PORT, () => {
     console.log(`OpenAthlete Masseneditor läuft auf Port ${PORT}, API: ${API}`);
   });
+// große Uploads (Garmin-Export) dürfen länger als die Standard-5-Minuten dauern
+server.requestTimeout = 0;
