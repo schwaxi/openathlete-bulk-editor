@@ -30,6 +30,7 @@ jobs:
           node --check app/fit.js
           node --check app/zip.js
           node --check app/export-import.js
+          node --check app/garmin-names.js
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3

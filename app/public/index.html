@@ -123,6 +123,48 @@
       <div id="gQuickMsg" class="err" style="margin-top:6px"></div>
     </div>
     <div class="card">
+      <h2>Namen aus Garmin übernehmen</h2>
+      <div class="hint" style="margin-bottom:10px">
+        Benennst du eine Aktivität in Garmin Connect um, kommt das in OpenAthlete nicht an. Der Editor fragt
+        deshalb Garmin selbst und braucht dafür den <strong>Garmin Personal API Key</strong>, denselben wie in
+        OpenAthlete unter Settings → Connectors → Garmin. Er bleibt auf deinem Server.
+        Übernommen werden Namen, die du in Garmin geändert hast. Hast du eine Aktivität in OpenAthlete oder im
+        Editor umbenannt, bleibt dein Name, bis du sie in Garmin umbenennst.
+      </div>
+      <div class="row">
+        <label>Garmin API Key <input type="password" id="nKey" autocomplete="off" spellcheck="false" style="min-width:260px"></label>
+        <button id="nKeySave">Speichern</button>
+        <button id="nKeyDel" class="small hidden">Key entfernen</button>
+        <span id="nKeyInfo" class="muted"></span>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label class="inline"><input type="checkbox" id="nAuto"> Bei „Neue Aktivitäten holen“ die Namen der letzten</label>
+        <input type="number" id="nDays" min="1" max="365" style="width:70px"> Tage mitabgleichen
+      </div>
+      <div class="row" style="margin-top:12px">
+        <label>Von <input type="date" id="nFrom"></label>
+        <label>Bis <input type="date" id="nTo"></label>
+        <button id="nPreview">Unterschiede suchen</button>
+        <button id="nCancel" class="hidden">Abbrechen</button>
+      </div>
+      <div class="hint" style="margin-top:4px">Ohne „Von“ wird dein ganzer Bestand abgeglichen. Vor dem Ändern siehst du eine Liste.</div>
+      <div id="nMsg" class="err" style="margin-top:6px"></div>
+      <div id="nJob" class="hidden" style="margin-top:10px">
+        <div class="progress"><div id="nBar"></div></div>
+        <div id="nPhase" style="margin-top:8px"></div>
+        <div id="nList" class="hidden" style="margin-top:10px">
+          <div class="row">
+            <label class="inline"><input type="checkbox" id="nAll"> alle</label>
+            <button class="primary" id="nApply">Ausgewählte übernehmen</button>
+            <span id="nCount" class="muted"></span>
+          </div>
+          <div class="tablewrap" style="max-height:440px;margin-top:6px">
+            <table><thead><tr><th></th><th>Datum</th><th>Jetzt in OpenAthlete</th><th>Name in Garmin</th><th>Warum</th></tr></thead><tbody id="nRows"></tbody></table>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
       <h2>Garmin-Export importieren (ZIP aus „Daten exportieren“)</h2>
       <div class="hint" style="margin-bottom:10px">
         Wähle die ZIP von Garmin unverändert unten aus und lade sie hoch (oder lege sie selbst in den Ordner
@@ -897,8 +939,119 @@ async function refreshGarmin() {
   renderGarminJob(data.job);
   renderQuickInfo(data.quick);
   refreshExport();
+  refreshNames();
 }
 
+// --------------------------------------------------------------------------
+// Namen aus Garmin
+// --------------------------------------------------------------------------
+let nLast = null;
+let nTimer = null;
+let nBuilt = false;
+const nSel = new Set();
+const nBusy = (j) => j && (j.status === 'running' || j.status === 'applying');
+async function refreshNames() {
+  let st;
+  try { st = await api('GET', '/api/names/status'); } catch (e) { $('nMsg').textContent = e.message; return; }
+  nLast = st;
+  renderNames(st);
+  if (nBusy(st.job) && !nTimer) nTimer = setInterval(refreshNames, 2000);
+  if (!nBusy(st.job) && nTimer) { clearInterval(nTimer); nTimer = null; }
+}
+function nUpdateCount() {
+  const n = nLast && nLast.job ? nLast.job.diffs.length : 0;
+  $('nCount').textContent = `${nSel.size} von ${n} ausgewählt`;
+  $('nApply').disabled = !nSel.size;
+  $('nAll').checked = n > 0 && nSel.size === n;
+}
+function renderNames(st) {
+  $('nKeyInfo').textContent = st.keySet ? `gespeichert (${st.keyHint})` : 'noch kein Key gespeichert';
+  $('nKeyDel').classList.toggle('hidden', !st.keySet);
+  if (document.activeElement !== $('nDays')) $('nDays').value = st.autoDays;
+  $('nAuto').checked = st.autoEnabled;
+  const job = st.job;
+  const busyN = nBusy(job);
+  $('nPreview').disabled = !st.keySet || busyN;
+  $('nCancel').classList.toggle('hidden', !busyN);
+  $('nJob').classList.toggle('hidden', !job);
+  if (!job) return;
+  $('nBar').style.width = `${Math.round((job.progress || 0) * 100)}%`;
+  const s = job.stats;
+  $('nPhase').innerHTML = `<strong>${esc(job.phase || '')}</strong>` +
+    (s ? `<br><span class="muted">${s.activities} Aktivitäten in OpenAthlete, ${s.garmin} in Garmin, ${s.matched} zugeordnet, ${s.same} stimmen schon überein</span>` : '') +
+    job.failed.slice(0, 30).map((f) => `<br><span class="err">✗ ${esc(f.current)} (${fmtDay(f.date)}): ${esc(f.error)}</span>`).join('');
+  const showList = job.status === 'ready' && job.diffs.length > 0;
+  $('nList').classList.toggle('hidden', !showList);
+  if (!showList) { nBuilt = false; return; }
+  if (!nBuilt) {
+    nBuilt = true;
+    nSel.clear();
+    for (const d of job.diffs) if (d.kind === 'garmin') nSel.add(d.eventId);
+    $('nRows').innerHTML = job.diffs.map((d) => `<tr>
+      <td><input type="checkbox" data-id="${d.eventId}"${nSel.has(d.eventId) ? ' checked' : ''}></td>
+      <td class="date">${fmtDay(d.date)}</td><td>${esc(d.current)}</td><td><strong>${esc(d.garmin)}</strong></td>
+      <td class="muted">${d.kind === 'garmin' ? 'in Garmin geändert' : 'in OpenAthlete umbenannt'}</td></tr>`).join('');
+  }
+  nUpdateCount();
+}
+async function nSettings(body) {
+  $('nMsg').textContent = '';
+  try {
+    nLast = await api('PUT', '/api/names/settings', body);
+    renderNames(nLast);
+    return true;
+  } catch (e) {
+    $('nMsg').textContent = e.message;
+    return false;
+  }
+}
+$('nKeySave').addEventListener('click', async () => {
+  const key = $('nKey').value.trim();
+  if (!key) { $('nMsg').textContent = 'Bitte den Key eintragen.'; return; }
+  $('nKeySave').disabled = true;
+  $('nKeyInfo').textContent = 'prüfe bei Garmin …';
+  const ok = await nSettings({ key });
+  $('nKeySave').disabled = false;
+  if (ok) { $('nKey').value = ''; $('nKeyInfo').textContent = `✓ von Garmin bestätigt und gespeichert (${nLast.keyHint})`; }
+  else if (nLast) $('nKeyInfo').textContent = nLast.keySet ? `gespeichert (${nLast.keyHint})` : 'noch kein Key gespeichert';
+});
+$('nKeyDel').addEventListener('click', () => {
+  if (confirm('Garmin API Key aus dem Editor entfernen?\n\nIn OpenAthlete bleibt er gespeichert.')) nSettings({ key: '' });
+});
+$('nAuto').addEventListener('change', () => nSettings({ autoEnabled: $('nAuto').checked }));
+$('nDays').addEventListener('change', () => {
+  const d = Math.round(Number($('nDays').value));
+  if (d >= 1 && d <= 365) nSettings({ autoDays: d }); else $('nDays').value = nLast ? nLast.autoDays : 30;
+});
+$('nPreview').addEventListener('click', async () => {
+  $('nMsg').textContent = '';
+  nBuilt = false;
+  try { await api('POST', '/api/names/preview', { from: $('nFrom').value, to: $('nTo').value }); } catch (e) { $('nMsg').textContent = e.message; }
+  refreshNames();
+});
+$('nCancel').addEventListener('click', async () => {
+  try { await api('POST', '/api/names/cancel', {}); } catch { /* egal */ }
+  refreshNames();
+});
+$('nRows').addEventListener('change', (e) => {
+  const id = Number(e.target.dataset.id);
+  if (!id) return;
+  if (e.target.checked) nSel.add(id); else nSel.delete(id);
+  nUpdateCount();
+});
+$('nAll').addEventListener('change', () => {
+  const all = $('nAll').checked;
+  nSel.clear();
+  if (all && nLast && nLast.job) for (const d of nLast.job.diffs) nSel.add(d.eventId);
+  for (const cb of $('nRows').querySelectorAll('input[type=checkbox]')) cb.checked = all;
+  nUpdateCount();
+});
+$('nApply').addEventListener('click', async () => {
+  if (!nSel.size || !confirm(`${nSel.size} Namen aus Garmin übernehmen?\n\nNicht angehakte gelten danach als „in OpenAthlete umbenannt“ und bleiben, bis du sie in Garmin änderst.`)) return;
+  $('nMsg').textContent = '';
+  try { await api('POST', '/api/names/apply', { eventIds: [...nSel] }); } catch (e) { $('nMsg').textContent = e.message; }
+  refreshNames();
+});
 // --------------------------------------------------------------------------
 // Garmin-Export (ZIP)
 // --------------------------------------------------------------------------
@@ -961,6 +1114,7 @@ async function exportAction(action, body) {
   $('xMsg').textContent = '';
   try { renderExport(await api('POST', `/api/export/${action}`, body || {})); } catch (e) { $('xMsg').textContent = e.message; }
   refreshExport();
+  refreshNames();
 }
 $('xRefresh').addEventListener('click', () => refreshExport(true));
 $('xSource').addEventListener('change', () => renderExport(xLast && xLast.job));
@@ -1131,8 +1285,10 @@ function showQuickJob(job) {
   qWasRunning = false;
   const r = job.rulesResult;
   const rulesTxt = !r ? '' : r.error ? ' · <span class="err">Regeln fehlgeschlagen</span>' : r.noRules ? '' : ` · ${r.changed} per Regel angepasst`;
+  const nr = job.namesResult;
+  const namesTxt = !nr || nr.disabled ? '' : nr.error ? ' · <span class="err">Namensabgleich fehlgeschlagen</span>' : nr.changed ? ` · ${nr.changed} Namen aus Garmin` : '';
   if (job.status === 'done') {
-    quickMsg(`<span class="ok">✓ ${job.totals.imported} neu</span>${rulesTxt}`);
+    quickMsg(`<span class="ok">✓ ${job.totals.imported} neu</span>${namesTxt}${rulesTxt}`);
     if (view === 'edit' && !busy) loadActivities();
   } else {
     quickMsg(`<span class="err">${esc(job.phase || 'angehalten')}</span>`);

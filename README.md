@@ -44,6 +44,13 @@ bulk-edit your activities and import your full Garmin history.
 - Optional: fetch automatically whenever the editor is opened (at most every 30 minutes)
 - Lets you turn off OpenAthlete's hourly automatic Garmin sync and import on demand instead
 
+**Activity names from Garmin**
+- OpenAthlete only takes the Garmin name at import time; this keeps names in sync when you rename in Garmin Connect
+- Queries Garmin's activity list directly with your Garmin Personal API key (stored in `data/garmin-key.json`), matched by start time
+- Only names changed in Garmin are applied; names you changed in OpenAthlete are kept
+- Preview list for the whole history, plus automatic sync of the last N days on "Fetch new activities"
+- Split multisport legs keep their suffix ("New name – Bike")
+
 ## How it works
 
 The editor logs in with your OpenAthlete account and uses **OpenAthlete's own API**,
@@ -113,6 +120,7 @@ Or run it directly: `cd app && OA_API_URL=http://localhost:3000 node server.js`.
 | `DATA_DIR` | `/data` (image) | Where rules, the change log and the import state are stored |
 | `GARMIN_THROTTLE_MS` | `900000` | Window of OpenAthlete's import rate limit (3 per window) |
 | `GARMIN_POLL_MS` | `10000` | How often the import status is polled |
+| `GARMIN_NAMES_GAP_MS` | `300` | Pause between requests to Garmin's activity list |
 
 ## Requirements
 

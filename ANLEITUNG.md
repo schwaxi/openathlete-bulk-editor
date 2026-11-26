@@ -24,6 +24,7 @@ selbst neu. In die Datenbank schreibt der Editor nicht direkt.
   automatisch in 28-Tage-Abschnitte geteilt, läuft im Container weiter (siehe unten)
 - **Neue Aktivitäten holen** mit einem Klick (oben rechts): holt alles seit dem letzten
   Import und wendet danach automatisch deine Regeln an
+- **Namen aus Garmin übernehmen**: in Garmin umbenannt, in OpenAthlete automatisch mitgeändert
 - **Garmin-Export importieren**: die große ZIP aus „Daten exportieren“ von Garmin Connect,
   inklusive **Multisport** (Triathlon wird in Schwimmen, Wechsel, Rad, Laufen geteilt)
 
@@ -37,6 +38,7 @@ Auf dem Unraid-Server soll diese Struktur entstehen:
 │   ├── server.js
 │   ├── garmin-import.js
 │   ├── export-import.js
+│   ├── garmin-names.js
 │   ├── fit.js
 │   ├── zip.js
 │   └── public/
@@ -128,6 +130,33 @@ Ausrüstung nach Kürzel. Oben rechts steht anschließend z. B. „✓ 3 neu · 
   ausschalten. **„Import meiner Garmin-Aktivitäten erlauben“** muss an bleiben.
 - Die Regeln gelten für alle Aktivitäten im geholten Zeitraum. Hast du dort eine
   Fahrt mit Kürzel von Hand anders eingestellt, setzt die Regel sie wieder zurück.
+
+## Namen aus Garmin übernehmen
+
+OpenAthlete übernimmt den Namen einer Garmin-Aktivität nur beim ersten Import.
+Benennst du sie danach in Garmin Connect um, bleibt in OpenAthlete der alte Name.
+Mit dieser Funktion reicht es, Namen **nur in Garmin** zu ändern.
+
+1. Unter *Garmin-Import → Namen aus Garmin übernehmen* den **Garmin Personal API Key**
+   eintragen, also denselben wie in OpenAthlete unter *Settings → Connectors → Garmin*.
+   Beim Speichern prüft der Editor den Key direkt bei Garmin. OpenAthlete speichert den
+   Key verschlüsselt und gibt ihn nicht heraus, darum braucht ihn der Editor selbst.
+   Er liegt in `data/garmin-key.json` auf deinem Server.
+2. Einmal **Unterschiede suchen** (ohne „Von“ = ganzer Bestand). Der Editor zeigt eine
+   Liste „Jetzt in OpenAthlete → Name in Garmin“. Was du anhakst, wird übernommen.
+3. Ab dann gleicht **Neue Aktivitäten holen** jedes Mal auch die Namen der letzten 30 Tage
+   ab. Die Tage kannst du einstellen, das Häkchen kann auch aus.
+
+- Die Zuordnung läuft über die Startzeit, denn die Garmin-ID gibt OpenAthlete nicht heraus.
+- **Übernommen wird nur, was in Garmin geändert wurde.** Der Editor merkt sich bei jedem
+  Abgleich den Garmin-Namen. Hast du eine Aktivität in OpenAthlete umbenannt, in Garmin
+  aber nicht, bleibt dein Name stehen, bis du sie in Garmin umbenennst. Beim allerersten
+  Abgleich gewinnt Garmin, außer der Editor hat die Aktivität laut Protokoll selbst umbenannt.
+- Geteilte Triathlons bekommen den neuen Namen vorne, die Endung bleibt:
+  „Neuer Name – Rad“.
+- Die Namen werden vor den Regeln gesetzt. Steht im neuen Namen ein Kürzel wie „M9“,
+  setzt die Regel danach gleich die passende Ausrüstung.
+- Jede Änderung steht im Protokoll (`data/aenderungen.log`, Konto „Name aus Garmin“).
 
 ## Garmin-Export importieren (inkl. Triathlon)
 

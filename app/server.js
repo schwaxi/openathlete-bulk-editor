@@ -276,8 +276,13 @@ function freeBytes(dir) {
   }
 }
 
+const { createNameSync } = require('./garmin-names');
+const nameSync = createNameSync({ dataDir: DATA_DIR, authed, apiError, logChange, logFile: LOG_FILE });
+
 const { createImporter } = require('./garmin-import');
-const importer = createImporter({ authed, dataDir: DATA_DIR, apiError, applyRules: applyRulesInRange });
+const importer = createImporter({
+  authed, dataDir: DATA_DIR, apiError, applyRules: applyRulesInRange, syncNames: (tokens) => nameSync.auto(tokens),
+});
 
 // ---------------------------------------------------------------------------
 // Routen
@@ -431,6 +436,29 @@ async function handle(req, res) {
       if (action === 'resume') return send(res, 200, importer.resume(session));
       if (action === 'retry') return send(res, 200, importer.retryFailed(session));
       return send(res, 200, importer.clear());
+    } catch (e) {
+      return send(res, 409, { error: e.message });
+    }
+  }
+
+  // --- Namen aus Garmin übernehmen -----------------------------------------
+  if (p === '/api/names/status' && req.method === 'GET') {
+    return send(res, 200, nameSync.status());
+  }
+  if (p === '/api/names/settings' && req.method === 'PUT') {
+    try {
+      return send(res, 200, await nameSync.saveSettings(await readBody(req)));
+    } catch (e) {
+      return send(res, 400, { error: e.message });
+    }
+  }
+  const nm = p.match(/^\/api\/names\/(preview|apply|cancel)$/);
+  if (nm && req.method === 'POST') {
+    try {
+      const body = await readBody(req);
+      if (nm[1] === 'preview') return send(res, 200, nameSync.preview(session, body));
+      if (nm[1] === 'apply') return send(res, 200, nameSync.apply(session, body));
+      return send(res, 200, nameSync.cancel());
     } catch (e) {
       return send(res, 409, { error: e.message });
     }

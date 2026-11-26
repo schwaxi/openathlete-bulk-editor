@@ -50,7 +50,7 @@ function makeChunks(startDate, endDate, order) {
 const QUICK_DAYS = 7; // ohne früheren Import: so viele Tage zurück
 const AUTO_MIN_GAP_MS = 30 * 60000; // automatisches Holen höchstens alle 30 Minuten
 
-function createImporter({ authed, dataDir, apiError, applyRules }) {
+function createImporter({ authed, dataDir, apiError, applyRules, syncNames }) {
   const stateFile = path.join(dataDir, 'garmin-import.json');
   const quickFile = path.join(dataDir, 'garmin-neu.json');
   let quick = {}; // { lastEnd: 'YYYY-MM-DD', lastRunAt: ISO }
@@ -232,6 +232,26 @@ function createImporter({ authed, dataDir, apiError, applyRules }) {
         quick.lastEnd = job.endDate;
         saveQuick();
       }
+      // Namen aus Garmin übernehmen (vor den Regeln, damit Kürzel im neuen Namen greifen)
+      if (job.kind === 'quick' && syncNames) {
+        job.current = null;
+        setPhase('Gleiche Namen mit Garmin ab …');
+        try {
+          const r = await syncNames(tokens);
+          if (r.disabled) job.namesResult = { disabled: r.disabled };
+          else {
+            job.namesResult = { changed: r.changed.length, kept: r.kept, failed: r.failed.length, days: r.days };
+            for (const c of r.changed.slice(0, 100)) addLog(`Name aus Garmin: „${c.current}“ → „${c.garmin}“ (${c.date})`);
+            for (const f of r.failed.slice(0, 50)) addLog(`✗ Name bei „${f.current}“ (${f.date}): ${f.error}`);
+            addLog(`Namen der letzten ${r.days} Tage mit Garmin abgeglichen: ${r.changed.length} übernommen` +
+              (r.kept ? `, ${r.kept} in OpenAthlete umbenannt und behalten` : '') + (r.failed.length ? `, ${r.failed.length} fehlgeschlagen` : '') + '.');
+          }
+        } catch (e) {
+          if (e.message === '__cancel') throw e;
+          job.namesResult = { error: e.message };
+          addLog(`✗ Namensabgleich mit Garmin fehlgeschlagen: ${e.message}`);
+        }
+      }
       if (job.applyRules && applyRules) {
         job.current = null;
         setPhase('Wende deine Regeln auf die Aktivitäten im Zeitraum an …');
@@ -288,6 +308,7 @@ function createImporter({ authed, dataDir, apiError, applyRules }) {
       chunks: makeChunks(startDate, endDate, order),
       totals: { imported: 0, matched: 0, skipped: 0, needsReview: 0, failed: 0 },
       rulesResult: null,
+      namesResult: null,
       log: [],
       status: 'running',
       phase: 'Startet …',
