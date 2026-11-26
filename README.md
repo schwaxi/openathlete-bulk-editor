@@ -51,6 +51,12 @@ bulk-edit your activities and import your full Garmin history.
 - Preview list for the whole history, plus automatic sync of the last N days on "Fetch new activities"
 - Split multisport legs keep their suffix ("New name – Bike")
 
+**Gear from the Garmin export**
+- Reads the gear list and the activity ↔ gear links from the export (`*_gear.json`)
+- Creates shoes and bikes in OpenAthlete (or maps them to existing ones), retired gear gets a "(ausgemustert)" suffix
+- Sets the gear on the matching activities (by start time) and optionally takes over Garmin's default gear
+- Never replaces a default already set in OpenAthlete; re-running creates no duplicates
+
 ## How it works
 
 The editor logs in with your OpenAthlete account and uses **OpenAthlete's own API**,

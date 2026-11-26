@@ -276,6 +276,9 @@ function freeBytes(dir) {
   }
 }
 
+const { createGearImporter } = require('./gear-import');
+const gearImporter = createGearImporter({ dataDir: DATA_DIR, authed, apiError, logChange });
+
 const { createNameSync } = require('./garmin-names');
 const nameSync = createNameSync({ dataDir: DATA_DIR, authed, apiError, logChange, logFile: LOG_FILE });
 
@@ -436,6 +439,22 @@ async function handle(req, res) {
       if (action === 'resume') return send(res, 200, importer.resume(session));
       if (action === 'retry') return send(res, 200, importer.retryFailed(session));
       return send(res, 200, importer.clear());
+    } catch (e) {
+      return send(res, 409, { error: e.message });
+    }
+  }
+
+  // --- Ausrüstung aus dem Garmin-Export --------------------------------------
+  if (p === '/api/gear/status' && req.method === 'GET') {
+    return send(res, 200, gearImporter.status());
+  }
+  const gr = p.match(/^[/]api[/]gear[/](preview|apply|cancel)$/);
+  if (gr && req.method === 'POST') {
+    try {
+      const body = await readBody(req);
+      if (gr[1] === 'preview') return send(res, 200, gearImporter.preview(session));
+      if (gr[1] === 'apply') return send(res, 200, gearImporter.apply(session, body));
+      return send(res, 200, gearImporter.cancel());
     } catch (e) {
       return send(res, 409, { error: e.message });
     }

@@ -36,6 +36,9 @@ function kindOf(name) {
 }
 const isZip = (name) => path.extname(name).toLowerCase() === '.zip';
 const isSummary = (name) => /summarizedActivities.*\.json$/i.test(name);
+// Ausrüstung samt Zuordnung zu Aktivitäten (DI-Connect-Fitness/<user>_gear.json)
+const isGear = (name) => /_gear\.json$/i.test(name);
+const isMeta = (name) => isSummary(name) || isGear(name);
 // Dateien im Export, die keine Aktivitäten sind (inReach-Karten, Routen …)
 const isIgnored = (name) => /(^|[\\/])INREACH[\\/]/i.test(name) || /(^|[\\/])mapdata-[^\\/]*$/i.test(name);
 
@@ -47,16 +50,23 @@ function xmlStart(buf) {
 }
 
 // Aktivitätsliste aus summarizedActivities.json: [{ start(ms), name, type }]
-function collectSummaries(data, out) {
-  if (Array.isArray(data)) { for (const x of data) collectSummaries(x, out); return; }
+// out: Liste mit Namen (für die Namenszuordnung)
+// index: optional Map activityId → { start, type } (auch Teil-Aktivitäten ohne Namen, für die Ausrüstung)
+function collectSummaries(data, out, index) {
+  if (Array.isArray(data)) { for (const x of data) collectSummaries(x, out, index); return; }
   if (!data || typeof data !== 'object') return;
   const start = data.startTimeGmt ?? data.beginTimestamp;
   const name = data.name ?? data.activityName;
+  if (typeof start === 'number' && data.activityId != null) {
+    if (index) index.set(String(data.activityId), { start, type: data.activityType || null });
+    if (typeof name === 'string') out.push({ start, name: name.trim(), type: data.activityType || data.sportType || null, parent: !!(data.parent || data.isParent) });
+    return;
+  }
   if (typeof start === 'number' && typeof name === 'string') {
     out.push({ start, name: name.trim(), type: data.activityType || data.sportType || null, parent: !!(data.parent || data.isParent) });
     return;
   }
-  for (const v of Object.values(data)) if (v && typeof v === 'object') collectSummaries(v, out);
+  for (const v of Object.values(data)) if (v && typeof v === 'object') collectSummaries(v, out, index);
 }
 
 function createExportImporter({ dataDir, upload, applyRules }) {
@@ -107,7 +117,7 @@ function createExportImporter({ dataDir, upload, applyRules }) {
         try { size = d.isDirectory() ? null : fs.statSync(full).size; } catch { /* egal */ }
         return { name: d.name, dir: d.isDirectory(), size };
       })
-      .filter((s) => s.dir || isZip(s.name) || kindOf(s.name) || isSummary(s.name));
+      .filter((s) => s.dir || isZip(s.name) || kindOf(s.name) || isMeta(s.name));
   }
 
   // --- Quellen durchlaufen --------------------------------------------------
@@ -122,7 +132,7 @@ function createExportImporter({ dataDir, upload, applyRules }) {
           const full = path.join(dir, d.name);
           if (d.isDirectory()) stack.push(full);
           else if (isZip(d.name)) onContainer({ type: 'zip', path: full });
-          else if ((kindOf(d.name) && !isIgnored(full)) || isSummary(d.name)) await visit(c, full, () => fs.readFileSync(full));
+          else if ((kindOf(d.name) && !isIgnored(full)) || isMeta(d.name)) await visit(c, full, () => fs.readFileSync(full));
         }
       }
       return;
@@ -139,7 +149,7 @@ function createExportImporter({ dataDir, upload, applyRules }) {
           }
           continue;
         }
-        if ((kindOf(e.name) && !isIgnored(e.name)) || isSummary(e.name)) await visit(c, e.name, () => zip.read(e));
+        if ((kindOf(e.name) && !isIgnored(e.name)) || isMeta(e.name)) await visit(c, e.name, () => zip.read(e));
       }
     } finally {
       zip.close();
@@ -167,6 +177,35 @@ function createExportImporter({ dataDir, upload, applyRules }) {
     return zip;
   }
 
+  // Ausrüstung für gear-import.js ablegen: Teile, Standards und Zuordnungen mit Startzeit
+  function saveGear(gear, index) {
+    const file = path.join(dataDir, 'garmin-gear.json');
+    if (!gear) return null;
+    const links = [];
+    let unknown = 0;
+    for (const list of Object.values(gear.gearActivityDTOs || {})) {
+      for (const l of Array.isArray(list) ? list : []) {
+        const a = index.get(String(l.activityId));
+        if (!a) { unknown++; continue; }
+        links.push({ gearPk: l.gearPk, activityId: String(l.activityId), start: a.start, type: a.type });
+      }
+    }
+    const data = {
+      createdAt: new Date().toISOString(),
+      gear: gear.gearDTOS.map((g) => ({
+        pk: g.gearPk, type: g.gearTypeName || null, status: g.gearStatusName || null,
+        name: String(g.customMakeModel || g.displayName || `Garmin-Ausrüstung ${g.gearPk}`).replace(/\s+/g, ' ').trim(),
+        begin: g.dateBegin || null, end: g.dateEnd || null,
+      })),
+      defaults: (gear.gearActivityTypeDTOS || []).filter((d) => d.defaultFlag).map((d) => ({ activityType: d.activityType, gearPk: d.gearPk })),
+      links,
+    };
+    fs.writeFileSync(file, JSON.stringify(data));
+    if (unknown) addLog(`${unknown} Ausrüstungs-Zuordnungen ohne Eintrag in der Aktivitätsliste übersprungen.`);
+    addLog(`Ausrüstung gefunden: ${data.gear.length} Teile, ${links.length} Zuordnungen zu Aktivitäten.`);
+    return { items: data.gear.length, links: links.length };
+  }
+
   // --- Prüfen ---------------------------------------------------------------
   async function scan(source) {
     const full = source ? path.join(importDir, source) : importDir;
@@ -176,6 +215,8 @@ function createExportImporter({ dataDir, upload, applyRules }) {
     const containers = [];
     const items = [];
     const summaries = [];
+    const index = new Map();
+    let gear = null;
     const stats = { files: 0, activities: 0, multisport: 0, nonActivity: 0, unreadable: 0 };
     while (queue.length) {
       checkCancel();
@@ -187,7 +228,15 @@ function createExportImporter({ dataDir, upload, applyRules }) {
       await walkContainer(c, async (cont, name, read) => {
         checkCancel();
         if (isSummary(name)) {
-          try { collectSummaries(JSON.parse(read().toString('utf8')), summaries); } catch (e) { addLog(`Aktivitätsliste ${path.basename(name)} nicht lesbar: ${e.message}`); }
+          try { collectSummaries(JSON.parse(read().toString('utf8')), summaries, index); } catch (e) { addLog(`Aktivitätsliste ${path.basename(name)} nicht lesbar: ${e.message}`); }
+          return;
+        }
+        if (isGear(name)) {
+          try {
+            const d = JSON.parse(read().toString('utf8'));
+            const g = Array.isArray(d) ? d[0] : d;
+            if (g && Array.isArray(g.gearDTOS) && g.gearDTOS.length > (gear ? gear.gearDTOS.length : 0)) gear = g;
+          } catch (e) { addLog(`Ausrüstungsliste ${path.basename(name)} nicht lesbar: ${e.message}`); }
           return;
         }
         stats.files++;
@@ -245,6 +294,7 @@ function createExportImporter({ dataDir, upload, applyRules }) {
       from: starts.length ? new Date(Math.min(...starts)).toISOString() : null,
       to: starts.length ? new Date(Math.max(...starts)).toISOString() : null,
     };
+    job.scan.gear = saveGear(gear, index);
     addLog(`Geprüft: ${stats.activities} Aktivitäten (${stats.multisport} Multisport), ${named} mit Namen aus Garmin, ${stats.nonActivity} andere Dateien übersprungen${stats.unreadable ? `, ${stats.unreadable} nicht lesbar` : ''}.`);
   }
 

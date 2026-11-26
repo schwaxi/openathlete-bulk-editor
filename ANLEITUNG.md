@@ -25,6 +25,7 @@ selbst neu. In die Datenbank schreibt der Editor nicht direkt.
 - **Neue Aktivitäten holen** mit einem Klick (oben rechts): holt alles seit dem letzten
   Import und wendet danach automatisch deine Regeln an
 - **Namen aus Garmin übernehmen**: in Garmin umbenannt, in OpenAthlete automatisch mitgeändert
+- **Ausrüstung aus dem Garmin-Export**: Schuhe und Räder anlegen und den Aktivitäten zuordnen
 - **Garmin-Export importieren**: die große ZIP aus „Daten exportieren“ von Garmin Connect,
   inklusive **Multisport** (Triathlon wird in Schwimmen, Wechsel, Rad, Laufen geteilt)
 
@@ -39,6 +40,7 @@ Auf dem Unraid-Server soll diese Struktur entstehen:
 │   ├── garmin-import.js
 │   ├── export-import.js
 │   ├── garmin-names.js
+│   ├── gear-import.js
 │   ├── fit.js
 │   ├── zip.js
 │   └── public/
@@ -194,6 +196,36 @@ und Duathlons nämlich ab.
 - Für das Entpacken braucht der Editor vorübergehend so viel freien Platz im
   `data`-Ordner, wie die größte innere ZIP groß ist. Nach dem Import kannst du die
   Export-ZIP mit **Löschen** neben der Dateiauswahl entfernen.
+
+### Ausrüstung aus dem Export
+
+Der Export enthält auch deine Ausrüstung und bei welchen Aktivitäten du sie verwendet
+hast. Nach **Prüfen** erscheint darunter die Karte **Ausrüstung aus dem Garmin-Export**.
+Am besten nutzt du sie nach dem Import, damit die Aktivitäten schon in OpenAthlete sind.
+
+1. **Ausrüstung prüfen.** Du siehst jedes Teil aus Garmin, bei wie vielen Aktivitäten in
+   OpenAthlete es gefunden wurde, und was damit passieren soll:
+   „Neu als Schuh“, „Neu als Rad“, „Vorhanden: …“ (ein Teil, das es in OpenAthlete schon
+   gibt) oder „Nicht übernehmen“. Gleich benannte Teile sind schon zugeordnet.
+   Tipp: Heißt dein Rad in OpenAthlete anders als in Garmin (z. B. „Velomobil M9“ und
+   „Alpha M9“), wähle „Vorhanden: …“. So bleibt es ein Teil, und deine Regeln passen weiter.
+2. Optionen: Standard-Ausrüstung übernehmen, Ausrüstung bei den Aktivitäten setzen,
+   und ob eine schon gesetzte andere Ausrüstung ersetzt wird.
+3. **Übernehmen.**
+
+- OpenAthlete kennt nur **Schuh** und **Rad** und hat keinen Status „ausgemustert“.
+  Ausgemusterte Teile bekommen deshalb „(ausgemustert)“ an den Namen. „Sonstiges“ und
+  Ski aus Garmin werden standardmäßig nicht übernommen. Du kannst sie aber z. B. als
+  Schuh anlegen, etwa ein Laufband.
+- Die Sportarten eines neuen Teils kommen aus den Aktivitäten, bei denen du es in Garmin
+  verwendet hast.
+- **Standard:** Ein Standard gilt in OpenAthlete für alle Sportarten eines Teils, und
+  OpenAthlete hängt ihn an neue Aktivitäten ohne Ausrüstung. Garmin-Standards für
+  Unterarten wie Laufband oder Liegerad wären in OpenAthlete Standard für *alle* Läufe
+  bzw. Fahrten. Sie sind deshalb nicht vorausgewählt. Einen Standard, den du in
+  OpenAthlete schon gesetzt hast, ersetzt der Editor nie.
+- Wechselzonen bekommen keine Ausrüstung. Jede Änderung steht im Protokoll.
+- Ein zweiter Durchlauf legt nichts doppelt an. Er erkennt die Teile am Namen.
 
 ## Garmin-Verlauf importieren
 

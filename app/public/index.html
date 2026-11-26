@@ -224,6 +224,42 @@
     </div>
 
     <div class="card">
+      <h2>Ausrüstung aus dem Garmin-Export</h2>
+      <div class="hint" style="margin-bottom:10px">
+        Der Garmin-Export enthält deine Ausrüstung und bei welchen Aktivitäten du sie verwendet hast.
+        Der Editor legt sie in OpenAthlete an, übernimmt deine Standard-Ausrüstung pro Sportart und setzt sie bei den
+        Aktivitäten (Zuordnung über die Startzeit, also am besten nach dem Import). OpenAthlete kennt nur
+        <strong>Schuh</strong> und <strong>Rad</strong>. Ausgemusterte Teile bekommen „(ausgemustert)“ an den Namen.
+      </div>
+      <div id="qNone" class="muted">Noch keine Ausrüstung gefunden. Prüfe zuerst oben einen Garmin-Export.</div>
+      <div id="qAvail" class="row hidden">
+        <span id="qInfo"></span>
+        <button id="qPreview">Ausrüstung prüfen</button>
+        <button id="qCancel" class="hidden">Abbrechen</button>
+      </div>
+      <div id="qMsg" class="err" style="margin-top:6px"></div>
+      <div id="qJob" class="hidden" style="margin-top:10px">
+        <div class="progress"><div id="qBar"></div></div>
+        <div id="qPhase" style="margin-top:8px"></div>
+        <div id="qPlan" class="hidden" style="margin-top:10px">
+          <div class="tablewrap" style="max-height:460px">
+            <table><thead><tr><th>Garmin</th><th>Art</th><th>Aktivitäten</th><th>In OpenAthlete</th></tr></thead><tbody id="qRows"></tbody></table>
+          </div>
+          <div id="qDefaults" class="summary"></div>
+          <div class="row" style="margin-top:8px">
+            <label class="inline"><input type="checkbox" id="qAssign" checked> Ausrüstung bei den Aktivitäten setzen</label>
+            <label class="inline"><input type="checkbox" id="qOver" checked> <span id="qOverTxt">auch wenn schon eine andere gesetzt ist</span></label>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <button class="primary" id="qApply">Übernehmen</button>
+            <span id="qCount" class="muted"></span>
+          </div>
+        </div>
+        <div id="qResult" class="summary hidden"></div>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>Garmin-Verlauf importieren</h2>
       <div class="hint" style="margin-bottom:10px">
         OpenAthlete importiert pro Auftrag höchstens 28 Tage und nimmt höchstens 3 Aufträge pro 15 Minuten an.
@@ -1053,6 +1089,100 @@ $('nApply').addEventListener('click', async () => {
   refreshNames();
 });
 // --------------------------------------------------------------------------
+// Ausrüstung aus dem Garmin-Export
+// --------------------------------------------------------------------------
+let gearLast = null;
+let gearTimer = null;
+let gearBuilt = false;
+const gearBusy = (j) => j && (j.status === 'running' || j.status === 'applying');
+async function refreshGear() {
+  let st;
+  try { st = await api('GET', '/api/gear/status'); } catch (e) { $('qMsg').textContent = e.message; return; }
+  gearLast = st;
+  renderGear(st);
+  if (gearBusy(st.job) && !gearTimer) gearTimer = setInterval(refreshGear, 1500);
+  if (!gearBusy(st.job) && gearTimer) { clearInterval(gearTimer); gearTimer = null; }
+}
+function gearChoices() {
+  const out = {};
+  for (const sel of $('qRows').querySelectorAll('select')) out[sel.dataset.pk] = sel.value;
+  return out;
+}
+function gearUpdateCount() {
+  const ch = Object.values(gearChoices());
+  const neu = ch.filter((c) => c === 'shoe' || c === 'bike').length;
+  const ex = ch.filter((c) => c.startsWith('eq:')).length;
+  $('qCount').textContent = `${neu} neu anlegen, ${ex} vorhandenen zuordnen, ${ch.length - neu - ex} nicht übernehmen`;
+}
+function renderGear(st) {
+  const a = st.available;
+  $('qNone').classList.toggle('hidden', !!a);
+  $('qAvail').classList.toggle('hidden', !a);
+  if (a) $('qInfo').textContent = `${a.items} Teile und ${a.links} Zuordnungen im Export gefunden.`;
+  const job = st.job;
+  const busyQ = gearBusy(job);
+  $('qPreview').disabled = busyQ;
+  $('qCancel').classList.toggle('hidden', !busyQ);
+  $('qJob').classList.toggle('hidden', !job);
+  if (!job) return;
+  $('qBar').style.width = `${Math.round((job.progress || 0) * 100)}%`;
+  const s = job.stats;
+  $('qPhase').innerHTML = `<strong>${esc(job.phase || '')}</strong>` + (s && job.status === 'ready'
+    ? `<br><span class="muted">${s.found} von ${s.links} Zuordnungen passen zu Aktivitäten in OpenAthlete (${s.events} Aktivitäten, davon ${s.withEquipment} schon mit Ausrüstung).</span>` : '');
+  const show = job.status === 'ready';
+  $('qPlan').classList.toggle('hidden', !show);
+  if (!show) gearBuilt = false;
+  if (show && !gearBuilt) {
+    gearBuilt = true;
+    const eqOpts = job.equipment.map((q) => `<option value="eq:${q.equipmentId}">Vorhanden: ${esc(q.name)}</option>`).join('');
+    $('qRows').innerHTML = job.gear.map((g) => `<tr>
+      <td>${esc(g.name)}${g.retired ? ' <span class="muted">(ausgemustert)</span>' : ''}</td>
+      <td>${esc(g.typeDe)}</td>
+      <td>${g.found}${g.found !== g.links ? ` <span class="muted">von ${g.links}</span>` : ''}</td>
+      <td><select data-pk="${g.pk}">
+        <option value="shoe">Neu als Schuh</option><option value="bike">Neu als Rad</option>${eqOpts}
+        <option value="skip">Nicht übernehmen</option></select></td></tr>`).join('');
+    for (const g of job.gear) $('qRows').querySelector(`select[data-pk="${g.pk}"]`).value = g.choice;
+    $('qDefaults').innerHTML = job.defaults.length
+      ? '<strong>Standard-Ausrüstung übernehmen</strong> (OpenAthlete hängt sie an neue Aktivitäten ohne Ausrüstung):' +
+        job.defaults.map((d) => `<br><label class="inline"><input type="checkbox" class="qDefBox" value="${d.key}"${d.suggested ? ' checked' : ''}>
+          ${esc(d.gearName)}: in Garmin Standard für „${esc(d.activityType)}“, in OpenAthlete dann für alle Aktivitäten „${esc(sportName(d.sport))}“</label>`).join('') +
+        '<br><span class="muted">In OpenAthlete gibt es kein Laufband oder Liegerad als eigene Sportart. Ein Standard gilt dort für die ganze Sportart, darum sind solche nicht vorausgewählt. Überschneiden sich zwei, wird nur der häufiger genutzte gesetzt.</span>'
+      : 'Keine Standard-Ausrüstung in Garmin.';
+    $('qOverTxt').textContent = `auch wenn schon eine andere gesetzt ist (${s.withEquipment} Aktivitäten haben schon eine)`;
+    gearUpdateCount();
+  }
+  const r = job.result;
+  $('qResult').classList.toggle('hidden', !r);
+  if (r) {
+    $('qResult').innerHTML = `<strong>${r.created.length}</strong> Teile angelegt · <strong>${r.assigned}</strong> Aktivitäten bekamen Ausrüstung` +
+      (r.same ? ` · ${r.same} hatten sie schon` : '') + (r.kept ? ` · ${r.kept} mit anderer Ausrüstung behalten` : '') +
+      (r.defaults.length ? `<br>Standard gesetzt: ${r.defaults.map(esc).join(' · ')}` : '') +
+      (r.defaultSkipped.length ? `<br><span class="muted">Nicht als Standard: ${r.defaultSkipped.map(esc).join(' · ')}</span>` : '') +
+      r.failed.slice(0, 30).map((f) => `<br><span class="err">✗ ${esc(f.what)}: ${esc(f.error)}</span>`).join('');
+  }
+}
+$('qPreview').addEventListener('click', async () => {
+  $('qMsg').textContent = '';
+  gearBuilt = false;
+  try { await api('POST', '/api/gear/preview', {}); } catch (e) { $('qMsg').textContent = e.message; }
+  refreshGear();
+});
+$('qCancel').addEventListener('click', async () => {
+  try { await api('POST', '/api/gear/cancel', {}); } catch { /* egal */ }
+  refreshGear();
+});
+$('qRows').addEventListener('change', gearUpdateCount);
+$('qApply').addEventListener('click', async () => {
+  if (!confirm(`${$('qCount').textContent}.\n\nÜbernehmen?`)) return;
+  $('qMsg').textContent = '';
+  try {
+    const defaults = [...document.querySelectorAll('.qDefBox:checked')].map((b) => Number(b.value));
+    await api('POST', '/api/gear/apply', { choices: gearChoices(), defaults, assign: $('qAssign').checked, overwrite: $('qOver').checked });
+  } catch (e) { $('qMsg').textContent = e.message; }
+  refreshGear();
+});
+// --------------------------------------------------------------------------
 // Garmin-Export (ZIP)
 // --------------------------------------------------------------------------
 let xLast = null;
@@ -1073,6 +1203,8 @@ async function refreshExport(forceList) {
     sel.dataset.opts = opts;
   }
   renderExport(data.job);
+  // nach dem Prüfen eines Exports kann neue Ausrüstung da sein
+  if (!gearBusy(gearLast && gearLast.job)) refreshGear();
 }
 function renderExport(job) {
   const busyX = job && (job.status === 'running' || job.status === 'scanning');
